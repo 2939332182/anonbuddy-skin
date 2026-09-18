@@ -71,6 +71,7 @@ hero.webp  ─┼─> injector.applySkin
 | 改 `injector.mjs` / `removeSkin` / 收尾逻辑 | `--suite core`（**必须**，含幂等回归） | ~40s |
 | 改菜单交互（重命名/删除/上传/拖动） | `--suite menu` | ~30s |
 | 改**设置面板集成**（插件条目 / 面板皮肤列表 / 悬浮图标开关） | `--suite ui`（含 `test-settings-panel`） | ~35s |
+| 改 `applyMode` / 深浅色类切换 / 设置界面配色 | `--suite ui`（含 `test-theme-switch-perf`） | ~45s |
 | 改 `scripts/*.ps1` | `npm run test:static` | 秒级 |
 | 改 `package.json` / 新增脚本 | `npm run test:static` | 秒级 |
 | 发版前 / 大重构 | `npm run test:all` | ~2min |
@@ -171,6 +172,60 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 原因：`dispose()` 只能清掉"当前实例变量里记着的那两个节点"，
 旧版本脚本 / 异常中断留下的节点不在任何变量里，会在导航栏叠成两个同名条目、
 内容区叠成两层列表（实测出现过 3 份）。新增注入物时记得同步加进这段扫描。
+
+### ⚠️ 切主题的性能红线：applyMode 不许空刷 class（2026-09-19 实测）
+
+**症状**：切到深色主题（如「鸣潮」）时明显卡顿、掉帧，严重时**整个渲染器主线程卡死**
+（连 CDP `Runtime.enable` 都超时，只能 `Page.reload` 救回来）。
+
+**根因**：`applyMode` 旧实现对 6 个深浅色类无条件 `classList.toggle(cls, force)`，
+**同时刷 `body` 和 `html` 两个节点**。而 WorkBuddy 里有大量"祖先类 + 后代"规则：
+
+    body.vscode-light .icon-xxx   ← 496 条
+    body.cb-light     .icon-xxx   ← 474 条
+    body.light        .icon-xxx   ← 487 条
+    （深色三件套同类，合计约 2600 条）
+
+每增删一个类，引擎都要把这些规则对整棵 DOM（~3200 个元素）重新匹配一遍。
+致命的是：`classList.toggle(cls, false)` 在**类本来就不存在**时什么都没改，
+浏览器却照样把它当一次 mutation 去失效样式 —— 纯属白付钱。
+
+**实测量化**（同一页面、同一条件下对照）：
+
+| 操作 | 耗时 |
+|---|---|
+| 移除 `light` 三件套（body） | **46.5ms** |
+| 再加回来（已存在，真 no-op） | 0.1ms |
+| 单个 `light` / `vscode-light` / `cb-light` 各刷一次 | ~50ms each |
+| 一次完整 `setTheme`（修复前） | **55~65ms** |
+| 一次完整 `setTheme`（修复后） | **~18ms** |
+| 连续切 30 次（修复前） | 可把主线程卡死 |
+| 连续切 30 次（修复后） | 最坏 31.5ms、均值 20ms，渲染器始终响应 |
+
+> 注：`~43ms` 是 **WorkBuddy 自身的固有开销**（把皮肤整个卸掉再测，移除那三个类仍要 43ms），
+> 皮肤只额外放大约 5ms。所以这块不可能完全消除，只能避免"不必要的触发"。
+
+**修法**（`src/skin-menu.mjs`）：合并成 `MODE_CLASSES` + `syncModeClasses(el, dark)`，
+**先判断 `classList.contains(cls) === want`，命中就直接 `continue`，完全不碰 DOM**；
+`body` 与 `html` 分别判断（两个节点各付一遍，原来合计占一半开销）；
+`dataset` / `colorScheme` 同样先比对再写。
+效果：状态已经正确时**零 DOM mutation**，往返切换的中位耗时从 22ms 降到 0ms。
+
+**回归测试**：`scripts/test-theme-switch-perf.mjs`
+（单次同步耗时中位 < 40ms、同主题重复应用接近零开销、连切 30 次最坏 < 90ms、
+压力后渲染器仍响应、深色下设置界面文字对比度 ≥ 4.5:1）。
+
+### 设置界面的可读性兜底
+
+原生 `.settings-modal-overlay` 的 `background` 是**透明的**、`.settings-navigation`
+**也没有底色** —— 弹窗整体直接压在深色皮肤的主界面（背景图 + 深色底）上。
+浅色模式下 `.settings-modal__content` 自带 `rgb(247,247,247)` 实底所以看不出问题，
+一旦内容区底色变透明，左侧导航与正文就会和背景图叠在一起 → 浅字压深底/花底，糊成一团。
+
+`ensureModalSurface()` 做**条件性**兜底：只在检测到内容区 `background-color`
+的 alpha < 0.9 时，才铺一层与内容区一致的实底（并给导航栏补底色），
+同时打 `data-wb-pane-surface="1"` 标记避免覆盖原生内联样式。
+**原生自己有实底时一律不插手**，免得画蛇添足。
 
 ---
 

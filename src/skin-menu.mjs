@@ -261,19 +261,51 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     const v = parseInt(m[1], 16);
     return (0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)) > 140;
   };
+
+  // 深/浅色类名。WorkBuddy 有 ~2600 条 "body.vscode-light .xxx" / "body.cb-light .xxx"
+  // 这样的「祖先类 + 后代」规则（图标主题那套），每次增删这些类都要让引擎
+  // 把所有规则对整棵 DOM 重新匹配一遍。
+  //
+  // ⚠️ 性能坑（2026-09-19 实测，一次切主题卡 55~65ms）：
+  //   classList.toggle(cls, false) 在类本来就不存在时**什么都不改变**，
+  //   但浏览器仍然会把它当作一次 mutation 去失效样式 —— 白白付一遍全量重匹配的钱。
+  //   实测「移除 light 三件套」= 46.5ms，而「再加回来」= 0.1ms
+  //   （因为加的时候它们已经在了，是真的 no-op）。
+  //   所以下面必须**先判断是否真的需要改**，只动真正变化的类。
+  //   另外：深浅切换时 body 与 html 是各自独立的，也要分别判断，
+  //   否则 html 白白多付一遍（两个节点合计占到原来一半的开销）。
+  const MODE_CLASSES = [
+    ["light", false], ["vscode-light", false], ["cb-light", false],
+    ["dark", true], ["vscode-dark", true], ["cb-dark", true],
+  ];
+  // 返回真正被改过的类名，便于测试断言"没有多余改动"
+  const syncModeClasses = (el, dark) => {
+    const changed = [];
+    for (const [cls, isDarkCls] of MODE_CLASSES) {
+      const want = dark ? isDarkCls : !isDarkCls;
+      // 关键：命中这个分支就完全不动 DOM，不产生 mutation，也就没有重匹配
+      if (el.classList.contains(cls) === want) continue;
+      el.classList.toggle(cls, want);
+      changed.push(cls);
+    }
+    return changed;
+  };
+
   // 同步切换 WorkBuddy 的 VS Code 主题模式，让原生控件（输入框/按钮等）跟着深浅色变
   const applyMode = (surface) => {
     const dark = !isLightSurface(surface);
     const body = document.body;
     const html = document.documentElement;
-    body.dataset.vscodeThemeKind = dark ? "vscode-dark" : "vscode-light";
-    body.dataset.vscodeThemeName = dark ? "IDE Dark" : "IDE Light";
-    html.style.colorScheme = dark ? "dark" : "light";
-    ["light", "vscode-light", "cb-light", "dark", "vscode-dark", "cb-dark"].forEach((cls) => {
-      const isDarkCls = cls === "dark" || cls === "vscode-dark" || cls === "cb-dark";
-      body.classList.toggle(cls, dark ? isDarkCls : !isDarkCls);
-      html.classList.toggle(cls, dark ? isDarkCls : !isDarkCls);
-    });
+    if (body.dataset.vscodeThemeKind !== (dark ? "vscode-dark" : "vscode-light")) {
+      body.dataset.vscodeThemeKind = dark ? "vscode-dark" : "vscode-light";
+    }
+    if (body.dataset.vscodeThemeName !== (dark ? "IDE Dark" : "IDE Light")) {
+      body.dataset.vscodeThemeName = dark ? "IDE Dark" : "IDE Light";
+    }
+    const wantScheme = dark ? "dark" : "light";
+    if (html.style.colorScheme !== wantScheme) html.style.colorScheme = wantScheme;
+    syncModeClasses(body, dark);
+    syncModeClasses(html, dark);
   };
   // ---- 记住上次用的主题：重启后由 apply --theme last 自动恢复（自定义主题也能恢复）----
   const LAST_KEY = "workbuddySkinLastTheme";
@@ -1050,6 +1082,47 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     settingsPane.style.setProperty("--wb-pane-active", dark ? "rgba(255,255,255,.10)" : "rgba(36,201,215,.12)");
     // 卡片底色由变量给，这里兜一个显式值，避免变量在极端情况下没生效就变透明
     settingsPane.style.color = dark ? "#f0f2f6" : "#1a1a1a";
+    settingsPane.style.setProperty("--wb-pane-surface", surface);
+  };
+
+  // ---- 设置界面可读性兜底（2026-09-19）----
+  // 原生 .settings-modal-overlay 的 background 是透明的、.settings-navigation
+  // 也没有底色 —— 弹窗整体直接压在深色皮肤的主界面上（背景图 + 深色底）。
+  // 浅色模式下 .settings-modal__content 自己带了 rgb(247,247,247) 实底，所以看不出问题；
+  // 但一旦弹窗底色变透明（原生主题状态下就会），左侧导航与正文会直接和背景图叠在一起，
+  // 浅色文字落在深色/花哨的背景图上 → 对比度不足、看不清。
+  // 对策：只在检测到"弹窗没有实底"时，给弹窗铺一层与内容区一致的实底，
+  // 并且不覆盖原生已有的底色（原生有就不动，避免画蛇添足）。
+  const SOLID_ONLY_WHEN_TRANSPARENT = true;
+  const ensureModalSurface = () => {
+    const modal = document.querySelector(data.settingsOverlaySelector);
+    const content = modal?.querySelector(".settings-modal__content");
+    if (!content) return false;
+    const alphaOf = (value) => {
+      const m = /rgba?\\([0-9.]+, [0-9.]+, [0-9.]+(?:, ([0-9.]+))?\\)/.exec(value || "");
+      return m ? (m[1] === undefined ? 1 : Number(m[1])) : 0;
+    };
+    // 内容区已有足够实底 → 原生自己能处理，别插手
+    const contentBg = getComputedStyle(content).backgroundColor;
+    if (alphaOf(contentBg) >= 0.9) {
+      if (content.dataset.wbPaneSurface === "1") {
+        content.style.removeProperty("background-color");
+        delete content.dataset.wbPaneSurface;
+      }
+      return false;
+    }
+    if (!SOLID_ONLY_WHEN_TRANSPARENT) return false;
+    // 只在我们自己加的那层上生效；用 dataset 标记，避免覆盖原生内联样式
+    if (content.dataset.wbPaneSurface === "1") return true;
+    const surface = paneSurface();
+    content.style.backgroundColor = surface;
+    content.dataset.wbPaneSurface = "1";
+    const nav = modal.querySelector(".settings-navigation");
+    if (nav && alphaOf(getComputedStyle(nav).backgroundColor) < 0.9) {
+      nav.style.backgroundColor = surface;
+      nav.dataset.wbPaneSurface = "1";
+    }
+    return true;
   };
 
   // 点我们的导航条目：显示自己的面板、藏掉原生面板
@@ -1062,6 +1135,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (settingsPane.parentElement !== content) content.appendChild(settingsPane);
     // 原生面板与头部：保留 DOM（React 要管），只是不显示
     settingsPane.__renderList();
+    ensureModalSurface();
     syncPaneThemeVars();
     settingsPane.__syncSwitch();
     settingsPane.style.display = "flex";
