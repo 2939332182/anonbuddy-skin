@@ -261,6 +261,34 @@ node src/cli.mjs pause                             # 恢复原生
 node src/cli.mjs doctor                            # 检查环境（app 路径、端口、平台）
 ```
 
+也可以用 npm 脚本：`npm run apply` / `npm run pause` / `npm run status` / `npm run list` / `npm run doctor`。
+
+> **跨机器无需配置**：WorkBuddy 的安装路径（可执行文件、`app.asar`）是自动发现的
+> （常见安装位置 → 注册表 → 开始菜单快捷方式 → 从运行中的进程反推）。
+> 如果自动发现失败，用环境变量覆盖即可：`WORKBUDDY_EXE` / `WORKBUDDY_ASAR`。
+> `node src/cli.mjs doctor` 会打印它找到的路径。
+
+## 开发者：测试与迭代
+
+改动前请先读 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) —— 里面有**「改动 → 该跑哪些测试」映射表**，
+以及几条"改坏就出 bug"的不变量（顶栏偏移、sticky 实底、贴边锚点、幂等注入）。
+
+```bash
+npm test              # 静态检查 + 核心 e2e（日常改动跑这个就够）
+npm run test:static   # 不连 renderer，秒级，随时可跑
+npm run test:core     # 注入 / 还原 / 幂等 / 标题 / 图标
+npm run test:ui       # 布局与视觉
+npm run test:menu     # 菜单交互
+npm run test:all      # 全部 e2e（约 2 分钟）
+npm run lint          # 只校验生成物（改 CSS / 注入脚本后必跑）
+npm run test:list     # 列出套件与用例（含每个用例"为什么存在"）
+```
+
+e2e 依赖**真实运行中的 WorkBuddy**（它通过 CDP 连过去断言真实渲染结果）。
+没在跑时该套件会整段跳过而不是报失败。端口用 `WORKBUDDY_SKIN_PORT` 覆盖。
+
+> 交接给下一个 AI 助手继续开发？用 [`docs/HANDOFF-PROMPT.md`](docs/HANDOFF-PROMPT.md) 里的模板。
+
 ## 内置主题
 
 | 主题 id | 名称 | 风格 |
@@ -272,6 +300,8 @@ node src/cli.mjs doctor                            # 检查环境（app 路径�
 暂时用不到的主题没有删掉，只是移到了 `themes-removed/`（`miku-light`、`genshin-night`、
 `wuthering-tide`、恋与深空 ×2、火影忍者 ×2）。把目录移回 `themes/` 再 apply 一次，
 它就会重新出现在 🎨 菜单里。
+
+> `themes-removed/` 是本机存档，不进 git（见 `.gitignore`）。
 
 ## 设计边界
 
