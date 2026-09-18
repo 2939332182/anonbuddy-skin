@@ -44,6 +44,11 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     customId: "custom-upload",
     storageKey: "workbuddyCustomTheme",
     customListKey: "workbuddyCustomThemes",
+    // 设置面板集成：往「功能」分组插一个入口，右侧内容区渲染我们的面板
+    pluginName: "ChihayaAnon 插件",
+    settingsNavGroup: "\\u529f\\u80fd",
+    settingsNavSelector: ".settings-navigation__group",
+    settingsOverlaySelector: ".settings-modal-overlay",
   });
 
   return `(() => {
@@ -216,6 +221,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   const syncTitle = (item) => { item.title = item.__text.textContent + item.__hint; };
 
   const row = (label, dotColor, onPick, options = {}) => {
+    const host = options.container ?? panel;
     const item = document.createElement("div");
     item.style.cssText = "display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;";
     const dot = document.createElement("span");
@@ -226,6 +232,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     text.style.cssText = "flex:1;min-width:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
     item.append(dot, text);
     item.__text = text;
+    item.__dot = dot;
     // __defaultLabel 必须是主题真名，不能是别名 —— 否则「清空还原」会还原成上一次的别名
     item.__defaultLabel = options.defaultLabel ?? label;
     item.__themeId = options.renamable ? (options.id ?? null) : undefined;
@@ -244,7 +251,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
         openCtxMenu(item, event.clientX, event.clientY);
       });
     }
-    if (options.before) panel.insertBefore(item, options.before); else panel.appendChild(item);
+    if (options.before) host.insertBefore(item, options.before); else host.appendChild(item);
     return item;
   };
 
@@ -673,9 +680,19 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   const dispose = () => {
     stopped = true;
     clearInterval(watchTimer);
+    clearInterval(settingsTimer);
     clearTimeout(resizeTimer);
     window.removeEventListener("resize", onResize);
     copyObserver.disconnect();
+    settingsObserver.disconnect();
+    // 设置面板里的注入物要一起收掉：它们是挂在 React 容器里的，
+    // 只 disconnect 观察器会留下一份"孤儿"条目/面板。重新 apply 时新实例
+    // 又会插一份 → 导航栏出现两个同名条目、内容区出现两层列表。
+    try { pluginEntry?.remove(); } catch {}
+    try { settingsPane?.remove(); } catch {}
+    pluginEntry = null;
+    settingsPane = null;
+    pluginEntryActive = false;
   };
 
   // 历史自定义主题全部还原成菜单行（按上传顺序，排在「＋ 自定义图片」上面）
@@ -689,6 +706,21 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 绝对坐标在窗口缩小后会被夹到右边缘，之后再放大也回不到原位 ——
   // 这就是"窗口非最大化时插件图标位置偏移"的成因。
   const POS_KEY = "workbuddySkinMenuPos";
+  // 悬浮图标显隐开关：设置面板里的「显示悬浮小图标」控制；关掉后按钮隐藏，
+  // 但菜单本身与皮肤照常工作（入口改从设置面板进）。
+  const ICON_HIDDEN_KEY = "workbuddySkinIconHidden";
+  const readIconHidden = () => {
+    try { return localStorage.getItem(ICON_HIDDEN_KEY) === "1"; } catch { return false; }
+  };
+  const writeIconHidden = (hidden) => {
+    try { localStorage.setItem(ICON_HIDDEN_KEY, hidden ? "1" : "0"); } catch {}
+  };
+  let iconHidden = readIconHidden();
+  const applyIconVisibility = () => {
+    button.style.display = iconHidden ? "none" : "block";
+    if (iconHidden) { panel.style.display = "none"; closeCtxMenu(); }
+  };
+
   const SIZE = 38;
   const clampPos = (x, y) => ({
     x: Math.max(0, Math.min(Math.max(0, innerWidth - SIZE), x)),
@@ -808,6 +840,337 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   else if (data.activeId === null) clearTheme();
   else setTheme(data.activeId);
 
+  // ==================== 设置面板集成 ====================
+  // 在 WorkBuddy 设置面板（.settings-modal-overlay）左侧「功能」分组里插一个
+  // 「ChihayaAnon 插件」条目，点它时右侧内容区换成我们的面板。
+  //
+  // 为什么用 MutationObserver 而不是直接在导航栏上插：
+  //   设置面板是 React 渲染的，每次打开 / 切换 tab 都会重建整个 .settings-navigation，
+  //   我们插进去的按钮会被一起回收。只能守着导航栏，出现就补。
+  //
+  // 内容区不能真的"接管"右上角面板（那需要 React 路由），做法是：
+  //   原生 .settings-modal__panel 保留，我们只在它上面盖一层自己的面板并切换显隐。
+  //   切到别的 tab 时（原生面板内容变了）自动把自己收起来。
+
+  const pluginEntryId = data.menuId + "-settings-entry";
+  const pluginPaneId = data.menuId + "-settings-pane";
+  let settingsPane = null;      // 右侧我们的面板
+  let pluginEntry = null;       // 左侧导航条目
+  let pluginEntryActive = false;
+
+  // 面板配色必须跟着「设置弹窗自身的底色」走，而不是跟着皮肤主题走。
+  // 踩过的坑：设置弹窗是 WorkBuddy 原生的白色/深色实底，皮肤并没有把它染色
+  // （皮肤只覆盖主页视图，弹窗保持原生）。如果按皮肤主题取色，选中深色皮肤时
+  // 会把文字设成浅色 —— 白色弹窗上就成了白字白底，整个面板"看起来是空的"。
+  // 所以这里直接读内容区的实际计算背景色来判断深浅。
+  // 注意：这段代码整体在模板字符串里，正则里的反斜杠会被模板字面量吃掉一层，
+  // 所以字面量要写成双反斜杠（同文件 file.name.replace 那处的做法）。
+  const paneSurface = () => {
+    const content = document.querySelector(data.settingsOverlaySelector + " .settings-modal__content")
+      ?? document.querySelector(data.settingsOverlaySelector + " .settings-modal");
+    const bg = content ? getComputedStyle(content).backgroundColor : "";
+    const m = /rgba?\\(([0-9]+), ([0-9]+), ([0-9]+)/.exec(bg || "");
+    if (m) return "#" + [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, "0")).join("");
+    return "#f7f7f7";
+  };
+
+  const currentThemeId = () => document.documentElement.dataset.workbuddySkin ?? null;
+
+  // 面板行：和悬浮菜单的 row 同源（复用 row()），只是容器不同、点击后不关面板
+  const paneRow = (label, dotColor, onPick, options = {}) => row(label, dotColor, onPick, options);
+
+  const buildSettingsPane = () => {
+    const pane = document.createElement("div");
+    pane.id = pluginPaneId;
+    pane.dataset.wbPluginPane = "1";
+    pane.style.cssText = "display:none;flex-direction:column;height:100%;overflow:hidden;font:400 14px/1.5 system-ui;color:var(--wb-pane-text,#1a1a1a);";
+
+    // 头部：和原生 settings-modal__header 对齐
+    const header = document.createElement("div");
+    header.textContent = data.pluginName;
+    header.style.cssText = "flex:none;padding:16px 0 12px;font:600 16px/1.4 system-ui;";
+    pane.appendChild(header);
+
+    const body = document.createElement("div");
+    body.style.cssText = "flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 2px 24px;";
+
+    // ---- 分组 1：皮肤列表 ----
+    // 行的主题 id 存在 data-wb-theme-id 上，null（原生界面）编码成 "native"：
+    // dataset 会把 null 序列化成字符串 "null"，不能直接存原值。
+    const encodeRowId = (id) => (id === null ? "native" : String(id));
+    const decodeRowId = (raw) => (raw === "native" ? null : raw);
+    const listGroup = document.createElement("div");
+    listGroup.style.cssText = "margin-bottom:18px;";
+    const listLabel = document.createElement("p");
+    listLabel.textContent = "皮肤";
+    listLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    const listCard = document.createElement("div");
+    listCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));overflow:hidden;background:var(--wb-pane-card,#fff);";
+    listGroup.append(listLabel, listCard);
+
+    // 原生界面行 + 全部内置主题 + 全部自定义主题
+    const paneRows = new Map();
+    const renderList = () => {
+      listCard.textContent = "";
+      paneRows.clear();
+      const mk = (label, dotColor, onPick, options) => {
+        const item = paneRow(label, dotColor, onPick, { ...options, container: listCard });
+        item.style.padding = "10px 14px";
+        item.style.borderRadius = "0";
+        if (listCard.childElementCount > 1) item.style.borderTop = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
+        paneRows.set(options?.id ?? null, item);
+        markRow(item, options?.id ?? null);
+        return item;
+      };
+      mk(displayName(null, NATIVE_LABEL), "rgba(0,0,0,.24)", () => { clearTheme(); syncPaneSelection(); }, { id: null, renamable: true, defaultLabel: NATIVE_LABEL, menuHint: "\\uff08\\u53f3\\u952e\\u91cd\\u547d\\u540d\\uff09" });
+      for (const theme of data.themes) {
+        mk(displayName(theme.id, theme.name), theme.accent, () => { setTheme(theme.id); syncPaneSelection(); }, { id: theme.id, renamable: true, defaultLabel: theme.name });
+      }
+      for (const theme of customThemes) {
+        mk(displayName(theme.id, theme.name), theme.colors.accent, () => { applyCustomTheme(theme); syncPaneSelection(); }, { id: theme.id, renamable: true, defaultLabel: theme.name, menuHint: "\\uff08\\u53f3\\u952e\\uff1a\\u91cd\\u547d\\u540d / \\u5220\\u9664\\uff09" });
+      }
+      syncPaneSelection();
+    };
+
+    // 当前选中：底色 + 打勾
+    let selectionMark = null;
+    const markRow = (item, id) => {
+      item.dataset.wbThemeId = encodeRowId(id);
+      const check = document.createElement("span");
+      check.textContent = "\\u2713";
+      check.style.cssText = "flex:none;width:16px;text-align:center;opacity:0;color:var(--wb-pane-accent,#24c9d7);font-weight:700;";
+      item.appendChild(check);
+      item.__check = check;
+    };
+    const syncPaneSelection = () => {
+      const active = currentThemeId();
+      for (const [id, item] of paneRows) {
+        const on = id === active;
+        if (item.__check) item.__check.style.opacity = on ? "1" : "0";
+        item.style.background = on ? "var(--wb-pane-active,rgba(36,201,215,.12))" : "transparent";
+      }
+      // 悬浮菜单的选中态也同步一下
+      paint(active);
+    };
+
+    // ---- 分组 2：添加皮肤 ----
+    const addGroup = document.createElement("div");
+    addGroup.style.cssText = "margin-bottom:18px;";
+    const addLabel = document.createElement("p");
+    addLabel.textContent = "添加";
+    addLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    const addCard = document.createElement("div");
+    addCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));overflow:hidden;background:var(--wb-pane-card,#fff);";
+    const addRow = document.createElement("div");
+    addRow.setAttribute("role", "button");
+    addRow.tabIndex = 0;
+    addRow.style.cssText = "display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;";
+    const addPlus = document.createElement("span");
+    addPlus.textContent = "\\uff0b";
+    addPlus.style.cssText = "flex:none;width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--wb-pane-active,rgba(36,201,215,.12));color:var(--wb-pane-accent,#0e8fa0);font-weight:700;";
+    const addText = document.createElement("span");
+    addText.textContent = "上传图片作为新皮肤";
+    addText.style.cssText = "flex:1;min-width:0;";
+    const addHint = document.createElement("span");
+    addHint.textContent = "PNG / JPG / WebP";
+    addHint.style.cssText = "flex:none;font-size:12px;opacity:.5;";
+    addRow.append(addPlus, addText, addHint);
+    addRow.addEventListener("mouseenter", () => { addRow.style.background = "rgba(0,0,0,.04)"; });
+    addRow.addEventListener("mouseleave", () => { addRow.style.background = "transparent"; });
+    addRow.addEventListener("click", () => picker.click());
+    addCard.appendChild(addRow);
+    addGroup.append(addLabel, addCard);
+
+    // ---- 分组 3：悬浮图标开关 ----
+    const toggleGroup = document.createElement("div");
+    const toggleLabel = document.createElement("p");
+    toggleLabel.textContent = "悬浮图标";
+    toggleLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    const toggleCard = document.createElement("div");
+    toggleCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);";
+    const toggleRow = document.createElement("div");
+    toggleRow.style.cssText = "display:flex;align-items:center;gap:12px;padding:12px 14px;";
+    const toggleCopy = document.createElement("div");
+    toggleCopy.style.cssText = "flex:1;min-width:0;";
+    const toggleTitle = document.createElement("div");
+    toggleTitle.textContent = "显示悬浮小图标";
+    const toggleDesc = document.createElement("div");
+    toggleDesc.textContent = "关闭后隐藏页面上的悬浮按钮，仍可从本页切换皮肤。";
+    toggleDesc.style.cssText = "font-size:12px;opacity:.55;margin-top:2px;";
+    toggleCopy.append(toggleTitle, toggleDesc);
+
+    // 开关：仿原生 wb-switch 的两态按钮
+    const switchEl = document.createElement("button");
+    switchEl.type = "button";
+    switchEl.setAttribute("role", "switch");
+    switchEl.style.cssText = "flex:none;position:relative;width:38px;height:22px;border-radius:11px;border:none;padding:0;cursor:pointer;transition:background .18s;";
+    const knob = document.createElement("span");
+    knob.style.cssText = "position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .18s;";
+    switchEl.appendChild(knob);
+    const syncSwitch = () => {
+      switchEl.setAttribute("aria-checked", iconHidden ? "false" : "true");
+      switchEl.style.background = iconHidden ? "rgba(0,0,0,.18)" : "var(--wb-pane-accent,#24c9d7)";
+      knob.style.transform = iconHidden ? "translateX(0)" : "translateX(16px)";
+      toggleDesc.textContent = iconHidden
+        ? "\\u5f53\\u524d\\u5df2\\u9690\\u85cf\\uff0c\\u4ecd\\u53ef\\u4ece\\u672c\\u9875\\u5207\\u6362\\u76ae\\u80a4\\u3002"
+        : "\\u5173\\u95ed\\u540e\\u9690\\u85cf\\u9875\\u9762\\u4e0a\\u7684\\u60ac\\u6d6e\\u6309\\u94ae\\uff0c\\u4ecd\\u53ef\\u4ece\\u672c\\u9875\\u5207\\u6362\\u76ae\\u80a4\\u3002";
+    };
+    switchEl.addEventListener("click", () => {
+      iconHidden = !iconHidden;
+      writeIconHidden(iconHidden);
+      applyIconVisibility();
+      syncSwitch();
+    });
+    toggleRow.append(toggleCopy, switchEl);
+    toggleCard.appendChild(toggleRow);
+    toggleGroup.append(toggleLabel, toggleCard);
+    // 开关状态可能被别处改（例如测试重置），每次打开面板都重读一次
+    pane.__syncSwitch = syncSwitch;
+
+    body.append(listGroup, addGroup, toggleGroup);
+    pane.append(body);
+    pane.__renderList = renderList;
+    pane.__syncSelection = syncPaneSelection;
+    return pane;
+  };
+
+  // 主题变量：让面板颜色跟随「设置弹窗自己的底色」（不是皮肤主题，见 paneSurface 注释）
+  const syncPaneThemeVars = () => {
+    if (!settingsPane) return;
+    const surface = paneSurface();
+    const dark = !isLightSurface(surface);
+    // 强调色可以沿用当前皮肤，它只是点缀，深浅背景下都够醒目
+    const id = currentThemeId();
+    const custom = customThemes.find((c) => c.id === id);
+    const accent = custom?.colors.accent ?? data.themes.find((t) => t.id === id)?.accent ?? DEFAULT_ACCENT;
+    settingsPane.style.setProperty("--wb-pane-accent", accent);
+    settingsPane.style.setProperty("--wb-pane-text", dark ? "#f0f2f6" : "#1a1a1a");
+    settingsPane.style.setProperty("--wb-pane-card", dark ? "rgba(255,255,255,.06)" : "#ffffff");
+    settingsPane.style.setProperty("--wb-pane-border", dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)");
+    settingsPane.style.setProperty("--wb-pane-active", dark ? "rgba(255,255,255,.10)" : "rgba(36,201,215,.12)");
+    // 卡片底色由变量给，这里兜一个显式值，避免变量在极端情况下没生效就变透明
+    settingsPane.style.color = dark ? "#f0f2f6" : "#1a1a1a";
+  };
+
+  // 点我们的导航条目：显示自己的面板、藏掉原生面板
+  const openPluginPane = () => {
+    const modal = document.querySelector(data.settingsOverlaySelector);
+    if (!modal) return false;
+    const content = modal.querySelector(".settings-modal__content");
+    if (!content) return false;
+    if (!settingsPane) settingsPane = buildSettingsPane();
+    if (settingsPane.parentElement !== content) content.appendChild(settingsPane);
+    // 原生面板与头部：保留 DOM（React 要管），只是不显示
+    settingsPane.__renderList();
+    syncPaneThemeVars();
+    settingsPane.__syncSwitch();
+    settingsPane.style.display = "flex";
+    content.querySelectorAll(":scope > .settings-modal__header, :scope > .settings-modal__panel").forEach((el) => {
+      el.style.display = "none";
+    });
+    modal.querySelectorAll(".settings-navigation__item").forEach((el) => el.classList.remove("settings-navigation__item--active"));
+    pluginEntry?.classList.add("settings-navigation__item--active");
+    pluginEntryActive = true;
+    return true;
+  };
+
+  // 原生面板回来（用户点了别的 tab / 面板重渲染）
+  const closePluginPane = () => {
+    if (!pluginEntryActive) return;
+    pluginEntryActive = false;
+    if (settingsPane) settingsPane.style.display = "none";
+    const modal = document.querySelector(data.settingsOverlaySelector);
+    const content = modal?.querySelector(".settings-modal__content");
+    content?.querySelectorAll(":scope > .settings-modal__header, :scope > .settings-modal__panel").forEach((el) => {
+      el.style.display = "";
+    });
+  };
+
+  // 把我们的条目补进「功能」分组（幂等）
+  const ensureSettingsEntry = () => {
+    if (stopped) return;
+    const overlay = document.querySelector(data.settingsOverlaySelector);
+    if (!overlay) {
+      // 面板关掉了：清掉引用，下次打开重建
+      if (settingsPane) { settingsPane.remove(); settingsPane = null; }
+      pluginEntry = null;
+      pluginEntryActive = false;
+      return;
+    }
+    const nav = overlay.querySelector(".settings-navigation");
+    if (!nav) return;
+
+    // 防御性去重：只按「我们自己的变量」清理不够 —— 旧版本脚本 / 异常中断留下的
+    // 孤儿节点不在任何变量里，会和新插入的叠成两份。这里按 id 全量扫一遍，
+    // 只保留当前实例的那一个，其余直接摘掉。
+    const staleEntries = [...document.querySelectorAll('[id="' + pluginEntryId + '"]')].filter((el) => el !== pluginEntry);
+    for (const el of staleEntries) el.remove();
+    const stalePanes = [...document.querySelectorAll('[id="' + pluginPaneId + '"]')].filter((el) => el !== settingsPane);
+    for (const el of stalePanes) el.remove();
+    // 字体/卡片层也按标记扫一次（面板被 React 重建后可能留下游离的列表容器）
+    for (const el of document.querySelectorAll('[data-wb-plugin-pane="1"]')) {
+      if (el !== settingsPane) el.remove();
+    }
+
+    // 已经补过且还挂在树上就什么都不做
+    if (pluginEntry?.isConnected) {
+      if (pluginEntryActive) {
+        // 面板可能被 React 重建，确认我们的面板还在
+        if (!settingsPane?.isConnected || settingsPane.style.display === "none") openPluginPane();
+      }
+      return;
+    }
+
+    const groups = [...nav.querySelectorAll(data.settingsNavSelector)];
+    const featureGroup = groups.find((g) =>
+      (g.querySelector(".settings-navigation__group-title")?.textContent || "").trim() === data.settingsNavGroup)
+      ?? groups[1] ?? groups[0];
+    if (!featureGroup) return;
+
+    const entry = document.createElement("button");
+    entry.type = "button";
+    entry.id = pluginEntryId;
+    entry.className = "settings-navigation__item";
+    // 图标：和插件悬浮按钮同源（有自定义图就贴图，否则用调色盘字符）
+    const icon = document.createElement("span");
+    icon.className = "settings-navigation__icon";
+    if (data.icon) {
+      const img = document.createElement("span");
+      img.style.cssText = "display:block;width:16px;height:16px;border-radius:4px;background-image:url(" + JSON.stringify(data.icon) + ");background-size:cover;background-position:center;";
+      icon.appendChild(img);
+    } else {
+      icon.textContent = "\\u{1F3A8}";
+      icon.style.cssText = "font-size:13px;line-height:16px;";
+    }
+    const label = document.createElement("span");
+    label.textContent = data.pluginName;
+    entry.append(icon, label);
+    entry.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openPluginPane();
+    });
+    featureGroup.appendChild(entry);
+    pluginEntry = entry;
+
+    // 用户点了别的导航项 → 收起我们的面板
+    if (!nav.__wbPluginBound) {
+      nav.__wbPluginBound = true;
+      nav.addEventListener("click", (event) => {
+        if (event.target.closest?.("#" + pluginEntryId)) return;
+        closePluginPane();
+      }, true);
+    }
+  };
+  ensureSettingsEntry();
+
+  // 设置面板整体是 React 渲染的，守着 body 补条目（幂等，开销可控）
+  const settingsObserver = new MutationObserver(() => ensureSettingsEntry());
+  settingsObserver.observe(document.body, { childList: true, subtree: true });
+  const settingsTimer = setInterval(ensureSettingsEntry, 1200);
+
+  // 悬浮图标的显隐：启动时按存档还原
+  applyIconVisibility();
+
   // 供脚本化调用与测试：
   //   importFromDataUrl(dataUrl, name)  新增一个自定义主题
   //   renameTheme(id, name)             id 传主题 id；原生界面行传 null；name 传空串恢复默认名
@@ -833,6 +1196,49 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     resetPosition,
     renameTheme,
     deleteCustomTheme,
+    // ---- 设置面板集成（供测试与脚本化调用）----
+    settings: {
+      // 面板名 / 选择器常量，测试用来定位
+      name: data.pluginName,
+      entryId: pluginEntryId,
+      paneId: pluginPaneId,
+      overlaySelector: data.settingsOverlaySelector,
+      navGroup: data.settingsNavGroup,
+      // 把条目补进导航栏（幂等）；面板没开时返回 false
+      ensure: ensureSettingsEntry,
+      // 打开我们的面板（等价于点那个导航条目）
+      open: openPluginPane,
+      close: closePluginPane,
+      isOpen: () => pluginEntryActive,
+      entry: () => document.getElementById(pluginEntryId),
+      pane: () => document.getElementById(pluginPaneId),
+      // 面板里列出/点选的条目
+      rows: () => [...(document.getElementById(pluginPaneId)?.querySelectorAll("[data-wb-theme-id]") ?? [])].map((el) => ({
+        id: el.dataset.wbThemeId === "native" ? null : el.dataset.wbThemeId,
+        label: el.__text?.textContent ?? "",
+        selected: el.__check ? el.__check.style.opacity === "1" : false,
+      })),
+      clickRow: (id) => {
+        const key = id === null ? "native" : String(id);
+        const el = document.getElementById(pluginPaneId)?.querySelector('[data-wb-theme-id="' + key + '"]');
+        if (!el) return false;
+        el.click();
+        return true;
+      },
+    },
+    // 悬浮小图标开关
+    icon: {
+      isHidden: () => iconHidden,
+      setHidden: (hidden) => {
+        iconHidden = Boolean(hidden);
+        writeIconHidden(iconHidden);
+        applyIconVisibility();
+        settingsPane?.__syncSwitch?.();
+        return iconHidden;
+      },
+      visible: () => button.style.display !== "none",
+      key: ICON_HIDDEN_KEY,
+    },
     // 文案替换（侧边栏应用名 / 欢迎页主标题）+ 主标题逐字拆分 —— 供测试与脚本化调用
     copy: {
       apply: applyCopy,

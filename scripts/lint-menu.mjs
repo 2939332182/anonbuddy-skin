@@ -90,7 +90,10 @@ try {
   new Function(code);
 } catch (error) {
   console.error(`菜单脚本语法错误：${error.message}`);
-  console.error("提示：整个菜单脚本是一个模板字符串，注释里出现反引号会把它提前截断 —— 这是最常见的翻车方式。");
+  console.error("提示：整个菜单脚本是一个模板字符串，有两类写法会把它弄坏 ——");
+  console.error("  1) 注释里出现反引号 / ${...}：模板会提前截断，这是最常见的翻车方式；");
+  console.error("  2) 正则里的反斜杠：模板字面量会吃掉一层（\\s → s、\\( → (），");
+  console.error("     所以模板内的正则要写成双反斜杠（\\\\.  \\\\( ），或用 [0-9] 这类字符类绕开。");
   process.exit(1);
 }
 
