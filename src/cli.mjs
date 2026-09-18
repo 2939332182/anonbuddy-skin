@@ -52,7 +52,17 @@ export async function runCli(argv, overrides = {}) {
 
   if (command === "help") {
     return {
-      commands: ["list", "create --image PATH --name NAME", "apply [--theme ID] [--port 9223]", "pause", "status", "doctor"],
+      commands: [
+        "list",
+        "create --image PATH --name NAME",
+        "apply [--theme ID|last] [--port 9333]",
+        "pause",
+        "status",
+        "doctor",
+      ],
+      notes: {
+        "apply --theme last": "恢复用户上次在 🎨 菜单里选用的主题（含自定义上传的主题）；没选过则用默认主题",
+      },
     };
   }
   if (command === "list") return deps.listThemes({ roots });
@@ -62,14 +72,21 @@ export async function runCli(argv, overrides = {}) {
     return deps.createSingleImageTheme({ imagePath: args.image, name: args.name, storeRoot: deps.userThemesRoot });
   }
   if (command === "apply") {
-    const themeId = args.theme ?? DEFAULT_THEME_ID;
+    const requested = args.theme ?? DEFAULT_THEME_ID;
+    // `--theme last`：真正用哪个主题交给 renderer 决定（它才知道用户最后在菜单里选了什么，
+    // 包括只存在于 localStorage 的自定义主题）。这里只挑一个兜底主题，用于构建菜单与 CSS 模板。
+    const restoreLast = requested === "last";
     const themes = await deps.listThemes({ roots });
-    const selected = themes.find((theme) => theme.id === themeId);
-    if (!selected) throw new Error(`找不到主题：${themeId}`);
+    if (themes.length === 0) throw new Error("没有可用主题");
+    const activeId = restoreLast
+      ? (themes.some((theme) => theme.id === DEFAULT_THEME_ID) ? DEFAULT_THEME_ID : themes[0].id)
+      : requested;
+    const selected = themes.find((theme) => theme.id === activeId);
+    if (!selected) throw new Error(`找不到主题：${activeId}`);
     const loadedTheme = await deps.loadTheme(selected.path);
     const menuThemes = [];
     for (const theme of themes) {
-      if (theme.id === themeId) {
+      if (theme.id === activeId) {
         menuThemes.push(loadedTheme);
         continue;
       }
@@ -79,7 +96,7 @@ export async function runCli(argv, overrides = {}) {
         // 坏主题不阻塞换肤，只是不进菜单
       }
     }
-    return deps.applySkin({ loadedTheme, themes: menuThemes, port: portFrom(args.port) });
+    return deps.applySkin({ loadedTheme, themes: menuThemes, port: portFrom(args.port), activeId, restoreLast });
   }
   if (command === "pause" || command === "restore") {
     return deps.removeSkin({ port: portFrom(args.port) });

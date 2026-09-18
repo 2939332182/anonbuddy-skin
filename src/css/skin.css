@@ -1,0 +1,542 @@
+/* WORKBUDDY_SKIN:{{id}} */
+html,
+body {
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
+/* WorkBuddy 的 #root 在部分版本中只负责标题栏，高度只有约 36px。
+ * 背景放在 body 才能覆盖整个 renderer 视口，避免 cover 只裁出顶部一条。 */
+body {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, {{surface}} 96%, transparent) 0 22%, transparent 46%),
+    linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, {{surface}} 78%, transparent) 78% 100%),
+    url({{hero}}) center center / cover fixed no-repeat !important;
+}
+
+body[data-application-name=workbuddy] {
+  --wb-accent: {{accent}};
+  --wb-secondary: {{secondary}};
+  --wb-surface: {{surface}};
+  --wb-text: {{text}};
+  /* 主题化"玻璃"底色：surface 里掺一点 accent，避免大块容器
+   * 在浅色主题下看起来是纯白塑料、与皮肤不协调。 */
+  --wb-glass: color-mix(in srgb, var(--wb-surface) 86%, var(--wb-accent));
+
+  /* 背景 */
+  --cb-bg-primary: var(--wb-glass) !important;
+  --cb-bg-secondary: color-mix(in srgb, var(--wb-glass) 88%, transparent) !important;
+  --cb-panel-bg-primary: color-mix(in srgb, var(--wb-glass) 78%, transparent) !important;
+  --cb-team-member-card-background: color-mix(in srgb, var(--wb-glass) 78%, transparent) !important;
+
+  /* 文字 */
+  --cb-text-primary: var(--wb-text) !important;
+  --cb-text-secondary: color-mix(in srgb, var(--wb-text) 70%, transparent) !important;
+  --cb-text-disabled: color-mix(in srgb, var(--wb-text) 42%, transparent) !important;
+  --cb-text-link: var(--wb-accent) !important;
+  --cb-text-error-active: var(--wb-accent) !important;
+
+  /* VS Code 主题色包装 */
+  --cb-vscode-editor-background: var(--wb-surface) !important;
+  --cb-vscode-sideBar-background: color-mix(in srgb, var(--wb-surface) 90%, transparent) !important;
+  --cb-vscode-foreground: var(--wb-text) !important;
+  --cb-vscode-editor-foreground: var(--wb-text) !important;
+  --cb-vscode-descriptionForeground: color-mix(in srgb, var(--wb-text) 70%, transparent) !important;
+  --cb-vscode-titleBar-activeBackground: var(--wb-accent) !important;
+  --cb-vscode-titleBar-activeForeground: #ffffff !important;
+  --cb-vscode-titleBar-inactiveBackground: color-mix(in srgb, var(--wb-accent) 80%, var(--wb-surface)) !important;
+  --cb-vscode-titleBar-inactiveForeground: color-mix(in srgb, #ffffff 70%, transparent) !important;
+  --cb-titlebar-control-hover-background: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+  --cb-vscode-input-background: color-mix(in srgb, var(--wb-surface) 88%, transparent) !important;
+  --cb-vscode-dropdown-background: color-mix(in srgb, var(--wb-surface) 94%, transparent) !important;
+  --cb-vscode-list-hoverBackground: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+  --cb-vscode-toolbar-hoverBackground: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+  --cb-vscode-scrollbarSlider-background: color-mix(in srgb, var(--wb-accent) 30%, transparent) !important;
+  --cb-vscode-scrollbarSlider-hoverBackground: color-mix(in srgb, var(--wb-accent) 50%, transparent) !important;
+  --cb-vscode-textLink-foreground: var(--wb-accent) !important;
+  --cb-vscode-widget-border: color-mix(in srgb, var(--wb-accent) 45%, transparent) !important;
+  --cb-vscode-panel-border: color-mix(in srgb, var(--wb-accent) 30%, transparent) !important;
+
+  /* 按钮 */
+  --cb-button-dark-background: var(--wb-accent) !important;
+  --cb-button-dark-foreground: #ffffff !important;
+  --cb-button-dark-hover-background: color-mix(in srgb, var(--wb-accent) 85%, #000000) !important;
+  --cb-vscode-button-background: var(--wb-accent) !important;
+  --cb-vscode-button-foreground: #ffffff !important;
+  --cb-vscode-button-hoverBackground: color-mix(in srgb, var(--wb-accent) 85%, #000000) !important;
+
+  /* 描边 */
+  --cb-stroke-secondary: color-mix(in srgb, var(--wb-accent) 45%, transparent) !important;
+  --cb-markdown-hr-border-color: color-mix(in srgb, var(--wb-accent) 30%, transparent) !important;
+
+  /* 侧边栏顶部导航（新建任务 / 助理 / 专家 / 自动化 / 更多）的悬停与选中底色。
+   * WorkBuddy 原生走 --wb-todo-menu-bg-hover / -active（浅灰 #EBEBEB / #E6E6E6），
+   * 与皮肤色调不协调 —— 这就是左上角"换肤不完全"的来源，统一改成主题强调色。 */
+  --wb-todo-menu-bg-hover: color-mix(in srgb, var(--wb-accent) 14%, transparent) !important;
+  --wb-todo-menu-bg-active: color-mix(in srgb, var(--wb-accent) 26%, transparent) !important;
+
+  /* 新建任务（欢迎页）与「助理」对话页的原生底色。
+   * WorkBuddy 原生：--wb-home-bg-secondary = #ffffff（铺满整个内容区）、
+   * --wb-home-bg-primary = #f2f2f2、输入槽是 #f0f0f0→#f5f5f5 渐变。
+   * 它们会把整幅背景图盖成一块白板 —— 这就是"启动后新建任务界面换肤不完全"的来源。 */
+  --wb-home-bg-secondary: transparent !important;
+  --wb-home-bg-primary: color-mix(in srgb, var(--wb-glass) 62%, transparent) !important;
+  --wb-home-input-slot-bg: color-mix(in srgb, var(--wb-glass) 62%, transparent) !important;
+  --wb-quick-action-sub-item-bg: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+
+  /* 侧边面板底色：--wb-bg-content 原生是 #ffffff，
+   * 使用者清一色是面板外壳（.my-files-panel 我的文件 / .tencent-docs-panel /
+   * .tencent-lexiang-panel / .ima-panel 等），整块白板会把背景图盖住。
+   * 按项目里其他面板的惯例给 72% 玻璃底。 */
+  --wb-bg-content: color-mix(in srgb, var(--wb-glass) 72%, transparent) !important;
+}
+
+#root {
+  position: relative;
+  z-index: 0;
+  min-height: 100%;
+  color: var(--wb-text) !important;
+  background: transparent !important;
+}
+
+/* WorkBuddy 在模块初始化时注入 #workbuddy-desktop-layout-overrides，靠
+ * body[data-platform="windows"] #root { margin-top: 30px } 给自绘标题栏让位。
+ * 那条规则缺失或尚未生效时，匿名重置里的 html, body, #root { margin-top: 0 } 就会赢，
+ * 整个界面向上顶 30px —— 侧边栏的「WorkBuddy AI」标题直接压在菜单栏上
+ * （即"左上角 WorkBuddy 图标与顶栏重叠"）。
+ * 皮肤自带同款兜底把偏移钉死；macOS 走原生红绿灯（MENUBAR_HEIGHT = 0），必须排除。 */
+body[data-platform="windows"] #root,
+body:not([data-platform="mac"]):not([data-platform="windows"]) #root {
+  margin-top: var(--wb-desktop-menubar-height, 30px) !important;
+}
+
+/* 某些 WorkBuddy 版本会把主界面挂在 body 的直接子节点上，而不是 #root。
+ * 这些节点若保留默认不透明底色，会把 body 的整幅背景图盖掉。
+ *
+ * ⚠️ 但浮层（个人中心菜单 / 下拉 / 弹窗 / 右键菜单）也常常是 body 的直接子节点
+ * （React portal 默认挂 body），它们**必须**有实底 ——
+ * 否则文字会和后面的页面内容糊在一起、难以辨认。所以这里要排除掉。
+ * （曾经的写法是裸的 body > :not(#workbuddy-skin-menu)，
+ *   把 .user-menu-popover 一起弄透明了，个人中心菜单就糊了。） */
+body > :not(#workbuddy-skin-menu):not([class*="popover"]):not([class*="dropdown"]):not([class*="modal"]):not([class*="dialog"]):not([class*="context-menu"]):not([role="dialog"]):not([role="menu"]):not([role="tooltip"]),
+#root > *:not([class*="popover"]):not([class*="dropdown"]):not([class*="modal"]):not([class*="dialog"]):not([class*="context-menu"]):not([role="dialog"]):not([role="menu"]):not([role="tooltip"]) {
+  background-color: transparent !important;
+}
+
+/* 浮层（个人中心菜单 / 下拉 / 右键菜单…）的实底。
+ * 上面那条规则只是"不再把它们弄透明"，它们会退回原生白色（--wb-bg-card）；
+ * 这里再统一换成主题实色：既保证文字清晰可读，又和皮肤同色系。
+ * 用 surface 打底、只掺一点 glass —— 直接用 --wb-glass 会太饱和（菜单上很难看）。 */
+.user-menu-popover,
+.wb-popover,
+[class*="-context-menu"],
+[class*="-dropdown-menu"] {
+  background: color-mix(in srgb, var(--wb-glass) 42%, var(--wb-surface)) !important;
+}
+
+/* 关键：这些容器默认有不透明底色，会完全盖住 body 背景图 */
+.teams-container,
+.teams-container.is-mac,
+#root > div,
+#root > div > div {
+  background: transparent !important;
+}
+
+/* 所有 grid 项容器透明，让 #root 背景图大面积透出 */
+[data-view-id] {
+  background: transparent !important;
+}
+
+/* 内容区内的子层也透明（否则会盖住背景图和磨砂层）。
+ * conversation-shell 是当前 WorkBuddy 5.5.2 的实际主内容外壳，
+ * 它默认是纯白且覆盖整个消息区，正是背景只露出顶部一条的原因。 */
+.conversation-shell,
+.conversation-list,
+.main-content,
+.main-content--welcome,
+.sidebar-next {
+  background: transparent !important;
+}
+
+/* 新建任务（欢迎页）外壳：.wb-home-route 原生 background: var(--wb-home-bg-secondary)
+ * 即纯白，且铺满整个内容区（实测 1656×1040），会把背景图整片盖掉。
+ * 变量已经改成 transparent，这里再补直接规则，防止某些版本把底色写死。
+ * .claw-agent-chat-pane 是「助理」对话页的同类外壳，共用同一个变量。 */
+.wb-home-route,
+.wb-home-route__body,
+.wb-home-page,
+.wb-home-page__main-content,
+.wb-home-header,
+.wb-home-cloud-header,
+.wb-home-mobile-header,
+.claw-agent-chat-pane {
+  background: transparent !important;
+}
+
+/* 欢迎页内容整体居中，正好压在背景图最亮的位置（body 那层渐变只在左右和底部收边）。
+ * 加一层很淡的柔光托底，保证任何主题下标题和按钮都还读得清。 */
+.wb-home-page__main-content {
+  background: radial-gradient(ellipse 62% 46% at 50% 38%, color-mix(in srgb, var(--wb-glass) 58%, transparent) 0%, transparent 74%) !important;
+}
+
+/* 侧边栏左上角应用名（.logo-workbuddy-title）。
+ * 原生颜色是写死的 rgba(0,0,0,.9)（实测 color(srgb 0 0 0 / 0.9)），
+ * 不随 --cb-* 变量走 → 换深色主题时会是"黑字压深底"，看不见。
+ * 这里接到主题色上，并给它一点字距，和欢迎页主标题的调性对齐。 */
+body[data-application-name=workbuddy] [data-view-id=sidebar] .logo-workbuddy-title {
+  color: color-mix(in srgb, var(--wb-accent) 58%, var(--wb-text)) !important;
+  letter-spacing: .04em !important;
+}
+
+/* ============================================================
+ * 欢迎页主标题：日系轻小说风格（字距 + 描边 + 主题色渐变）
+ * ------------------------------------------------------------
+ * 硬性约束（别踩）：
+ * 1. 绝不动 font-size。字号由 #cb-font-size-override 的
+ *    .wb-home-header__title:not(.cb-font-size-fixed) 以 calc(30px + offset)
+ *    加 !important 给出（当前 offset = -1 → 实测 29px）。这里不声明 font-size，
+ *    所以「字号保持原样」自然成立，用户改字号设置时也跟着走。
+ * 2. 主题色渐变（background-image + clip:text + fill-color）**只写在这一条规则里**。
+ *    它是"整段文字变透明 + 露出背景"的做法，一旦外溢到别的元素就会把文字弄没。
+ * 3. 描边用 -webkit-text-stroke 的**半透明**色：它画在字形中心线上，会吃掉约
+ *    0.5 倍描边宽度的笔画；不透明描边会把笔画撑粗、糊掉笔画内部的镂空（如「探」的
+ *    中间），半透明则只留一圈边缘色，接近轻小说的空心字观感。
+ * 4. 描边 + text-shadow 只能二选一。两者都吃 fill 之外的效果，叠一起会让字变脏；
+ *    这里用渐变做"实心内芯"，外圈交给描边。
+ * ============================================================ */
+.wb-home-header__title {
+  /* 字距：0.1em 在 29px 下约 2.9px。过大中文会散架，且总宽变长（标题 nowrap，
+   * 靠 title-roll 的 overflow:hidden 裁切，所以不会换行，只会两端被裁）。 */
+  letter-spacing: .1em !important;
+  /* letter-spacing 会在最后一个字后面也追加一份间距，让视觉重心左偏。
+   * 补一个 1em 的右内边距抵消，标题仍保持视觉居中。 */
+  padding-right: 1em !important;
+  /* 主题色渐变：从左到右。两端取深色（text 掺 accent）、中段取亮色，
+   * 形成"深-亮-深"的彩墨过渡。
+   * 为什么中段不用 accent 本身：accent 常是高明度彩色（如粉 #c68879），
+   * 直接和 text 混出来的渐变在浅色背景上对比度不足、整行发灰。
+   * 让中段比两端更亮，字形内部才有"翻光"的塑料/彩墨质感 —— 这是轻小说标题的典型观感。 */
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--wb-accent) 72%, var(--wb-text)) 0%,
+    color-mix(in srgb, var(--wb-accent) 62%, white) 44%,
+    color-mix(in srgb, var(--wb-accent) 78%, var(--wb-text)) 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  /* 轻小说描边：0.03em ≈ 0.9px @29px。这个宽度是试出来的上限 ——
+   * text-stroke 画在字形中心线上，向内吃掉约半个描边宽度，
+   * 中文笔画（横竖各 1~1.5px）再宽就会把笔画内部糊死。
+   * 用 rgb(... / alpha) 而不是 color-mix：color-mix 会把 alpha 算进结果色值，
+   * 描边变成一块实色，同样糊笔画。这里显式留 alpha，只勾一圈边缘。
+   * 颜色取"accent 与 text 的中和"，避免在浅色图上描边太亮看不见。 */
+  -webkit-text-stroke: 0.03em rgb(from color-mix(in srgb, var(--wb-accent) 45%, var(--wb-text)) r g b / 0.5) !important;
+  /* 渐变把 fill 让给了背景，字会稍显轻飘；用一个很淡的字形外晕补回体积感。
+   * 这是 filter（作用于最终结果）而非 text-shadow，所以不会和 clip:text 冲突。 */
+  filter: drop-shadow(0 1px 1.5px color-mix(in srgb, var(--wb-text) 26%, transparent)) !important;
+}
+
+/* 标题的浅色衬边。
+ * 为什么需要：渐变和描边的色系都取自主题 accent，而主题背景图往往也带 accent 色调
+ * （实测这个粉色主题：字 0.61/0.43/0.40、背景同色系），同色系相邻会让字"融"进底图。
+ * 这是 text-stroke 天然做不到的事 —— 它是画在字形上的，做不出"字形外的底色环"。
+ * 用一层极淡的 surface 径向渐变垫在标题后面：只在字形周围提亮一点，不盖住背景图主体。
+ * 该元素只服务主标题，不会把主题色渐变外溢到别处。 */
+.wb-home-header__title-wrap::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(78%, 760px);
+  height: 190%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--wb-surface) 62%, transparent) 0%, transparent 72%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ::before 是衬底，必须真的在下面。原生给 title-roll 设了 z-index:1，
+ * 但 .wb-home-header__title 自己是 static，会跟着 wrap 的层叠上下文走。
+ * 这里显式把标题抬到衬底之上，避免某些版本里衬底把字盖住。 */
+.wb-home-header__title,
+.wb-home-header__title-roll,
+.wb-home-header__slogan-slot {
+  position: relative;
+  z-index: 1;
+}
+
+/* 兼容不支持 background-clip:text 的极端情况（Electron 自带 Chromium，理论不会走到）。
+ * 一旦 clip 失效 fill 仍是 transparent，文字会整段消失 —— 所以这里做一次能力检测兜底，
+ * 把 fill 恢复成主题色。 */
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .wb-home-header__title {
+    -webkit-text-fill-color: var(--wb-accent) !important;
+    background-image: none !important;
+  }
+}
+
+/* 标题内的 span 继承渐变；但 -webkit-background-clip 不继承，必须显式再声明一次，
+ * 否则 span 会把渐变铺成一块色板而不是"按字形裁切"（会看到一个字色块）。 */
+.wb-home-header__title > span {
+  background-image: inherit !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* ------------------------------------------------------------
+ * 逐字打字动画（每次打开新建任务 / 启动应用时播放一次）
+ * ------------------------------------------------------------
+ * 注入脚本会把 <span>探索未至之境</span> 拆成
+ *   <span><i>探</i><i>索</i><i>未</i><i>至</i><i>之</i><i>境</i></span>
+ * 每个 <i> 通过内联 --wb-char-index 携带自己的序号，这里用 calc 换算成延迟，
+ * 于是文字从左到右逐个"打"出来，而不是整行一起动。
+ *
+ * 时序参数（都做成变量，想调节奏改这里就行）：
+ *   --wb-type-step  每字间隔（0.075s × 6 字 ≈ 0.375s，整句与原生 0.42s 主时长同量级）
+ *   --wb-type-life  每字自身的淡入/上浮时长（0.34s）
+ *   最后一字结束 ≈ 5×0.075 + 0.34 = 0.715s，比原生场景切换略长一点。
+ *   这是刻意的：打字机效果的"逐字感"靠的就是拉开总时长；如果压到 0.42s，
+ *   每字间隔只剩 0.02s，看上去又变回整行一起出现。
+ *
+ * 为什么用 <i> 而不是给每个字包 <span>：外层已经有 span 了，
+ * 再用 span 会让 .wb-home-header__title > span 那条渐变规则失去区分度。
+ * ------------------------------------------------------------ */
+@keyframes workbuddy-skin-char-type-in {
+  from {
+    opacity: 0;
+    /* 打字机是"从左到右浮现"，字本身只做很小的上浮，不做整行位移 —— 
+     * 整行 translateY 会让人误以为还是"从下往上"，与需求相悖。 */
+    transform: translateY(.18em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wb-home-header__title > span > i {
+  /* inline-block 才能吃到 transform；同时保证字距（letter-spacing）仍由父级下发 */
+  display: inline-block;
+  /* 渐变继承：每个字是独立盒子，必须各自声明，否则看不到字面渐变 */
+  background-image: inherit !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-repeat: no-repeat !important;
+  /* 关键：延迟按序号递增 → 从左到右依次出现
+   * --wb-char-index 由注入脚本内联下发，缺省按 0 处理（退化成一起出现，不会报错） */
+  animation: workbuddy-skin-char-type-in var(--wb-type-life, .34s) var(--wb-app-swap-ease, cubic-bezier(0.32, 0, 0.24, 1)) both;
+  animation-delay: calc(var(--wb-char-index, 0) * var(--wb-type-step, .075s));
+  will-change: transform, opacity;
+}
+
+/* 尊重系统的"减少动态效果"设置 —— 无障碍上这是必须的。 */
+@media (prefers-reduced-motion: reduce) {
+  .wb-home-header__title > span > i {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* 原生翻滚正在跑（data-wb-swap-phase）时，让位给原生那套，避免两套动画打架。 */
+.wb-home-header__roll-cell[data-wb-swap-phase] .wb-home-header__title > span > i {
+  animation: none !important;
+}
+
+/* 左上角导航切换出来的整页视图，原生都是纯白且铺满内容区（实测 1656×1040）。
+ * 它们是"页面"而不是"面板"，按会话页的惯例直接透明，让背景图整片透出：
+ *   .claw-workspace       → 「助理」
+ *   .automation-main-page → 「自动化」 */
+.claw-workspace,
+.automation-main-page {
+  background: transparent !important;
+}
+
+/* 「我的文件」这类侧边面板的底色走 --wb-bg-content（已改成 72% 玻璃底），
+ * 再补一层磨砂，避免半透明面板压在花纹上显脏。 */
+.my-files-panel,
+.tencent-docs-panel,
+.tencent-lexiang-panel,
+.ima-panel {
+  backdrop-filter: blur(20px) saturate(1.12);
+}
+
+/* 右上角窗口控制区（最小化 / 最大化 / 关闭）自带不透明浅灰底 rgb(242,242,242)，
+ * 换肤后会在图片背景上露出一块灰白方块 —— 这就是"右上角显示 bug"。 */
+.workbuddy-window-controls,
+.workbuddy-menubar-container {
+  background: transparent !important;
+}
+
+.workbuddy-window-control-button {
+  background: transparent !important;
+  color: var(--wb-text) !important;
+}
+
+.workbuddy-window-control-button:hover {
+  background: color-mix(in srgb, var(--wb-accent) 22%, transparent) !important;
+}
+
+.workbuddy-window-control-button.close:hover {
+  background: #e81123 !important;
+  color: #ffffff !important;
+}
+
+/* 对话区这些容器默认是纯白 / 浅灰实底，会把背景图整片盖住，
+ * 这是"换肤不完全"的主要来源，统一改成主题半透明。 */
+.cr-input-container {
+  background: color-mix(in srgb, var(--wb-glass) 62%, transparent) !important;
+  backdrop-filter: blur(22px) saturate(1.15);
+}
+
+.cr-self-bubble {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent) !important;
+}
+
+.cr-widget-card,
+.cr-code-like-box {
+  background: color-mix(in srgb, var(--wb-glass) 70%, transparent) !important;
+}
+
+.cr-widget-header,
+.cr-code-like-box__header,
+.conversation-timeline table th {
+  background: color-mix(in srgb, var(--wb-glass) 82%, transparent) !important;
+}
+
+/* 输入框右侧工具条（上下文用量 + 模型选择器 + 发送按钮）默认是纯白底，
+ * 在已半透明的输入框里会露出一条突兀的白带，与输入框整体不协调。 */
+.cr-input-toolbar__right {
+  background: transparent !important;
+}
+
+/* 其余零散硬编码浅灰/纯白底色的容器，一并跟随主题 */
+.artifact-slot-panel__card,
+.conversation-list-invite-friends__card {
+  background: color-mix(in srgb, var(--wb-glass) 72%, transparent) !important;
+}
+
+.cr-inline-code {
+  background: color-mix(in srgb, var(--wb-accent) 14%, transparent) !important;
+}
+
+/* 侧边栏"空间 / 任务"列表：会话行默认不加底色（否则整列都是色块，很杂乱），
+ * 只在鼠标悬停、或该项正在使用时才给主题强调色。
+ * 这里刻意提高选择器权重：这些行自带 rgb(242,242,242) / rgb(230,230,230)
+ * 的硬编码底，普通权重压不住。 */
+body[data-application-name=workbuddy] [data-view-id=sidebar] .cb-agent-card {
+  background: transparent !important;
+  transition: background-color .12s ease;
+}
+
+/* 「空间 (3)」分组标题与工作区行（workbuddy-skin-studio / work1 / Program Files）
+ * 是 position:sticky（分组标题 top:0 z-index:2，工作区行 top:30 z-index:1）。
+ * sticky 行必须能遮住滚到它下面的列表项，否则两层文字互相穿透 ——
+ * 这就是"空间栏在不同任务窗口之间出现重叠"的成因。
+ *
+ * 注意：这里不能用 backdrop-filter 磨砂来解决。侧边栏自身（_gridViewItem_*）
+ * 已经带了 backdrop-filter，它会给后代建立新的 backdrop root，
+ * 后代的 backdrop-filter 就模糊不到滚动内容了（实测 blur(40px) 依然清晰穿透）。
+ * 所以只能给接近不透明的实底。
+ *
+ * 另外：悬停/选中一律用 background-image 叠加 accent 渐变，不去改 background-color ——
+ * 否则一选中底色又被替换成透明，文字继续穿透。 */
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-section-label,
+body[data-application-name=workbuddy] [data-view-id=sidebar] [class*="_headerTopPadding_"] {
+  background-color: var(--wb-glass) !important;
+  background-image: none;
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .cb-agent-card:hover {
+  background: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-section-label:hover,
+body[data-application-name=workbuddy] [data-view-id=sidebar] [class*="_headerTopPadding_"]:hover {
+  background-image: linear-gradient(color-mix(in srgb, var(--wb-accent) 18%, transparent), color-mix(in srgb, var(--wb-accent) 18%, transparent));
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .cb-agent-card[class*="_selected_"],
+body[data-application-name=workbuddy] [data-view-id=sidebar] .cb-agent-card[class*="_active_"] {
+  background: color-mix(in srgb, var(--wb-accent) 28%, transparent) !important;
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-section-label[class*="_selected_"],
+body[data-application-name=workbuddy] [data-view-id=sidebar] [class*="_headerTopPadding_"][class*="_selected_"],
+body[data-application-name=workbuddy] [data-view-id=sidebar] [class*="_headerTopPadding_"][class*="_active_"] {
+  background-image: linear-gradient(color-mix(in srgb, var(--wb-accent) 32%, transparent), color-mix(in srgb, var(--wb-accent) 32%, transparent));
+}
+
+/* "正在使用的空间"：WorkBuddy 不会给文件夹行加选中类，
+ * 所以用 :has() 找出"内部含有当前选中会话"的那个空间并高亮。 */
+body[data-application-name=workbuddy] [data-view-id=sidebar] .collapsible-section:has(.cb-agent-card[class*="_selected_"]) > [class*="_headerTopPadding_"] {
+  background-image: linear-gradient(color-mix(in srgb, var(--wb-accent) 26%, transparent), color-mix(in srgb, var(--wb-accent) 26%, transparent));
+}
+
+/* 侧边栏顶部导航：默认无底色，悬停 / 选中（.active）时才出主题强调色，
+ * 与下方"空间 / 任务"列表的交互保持一致。
+ * 变量覆盖之外再加一层直接规则，避免 WorkBuddy 内部有更高权重的覆盖。 */
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-button {
+  background: transparent !important;
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-button:hover,
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-row:hover {
+  background: color-mix(in srgb, var(--wb-accent) 16%, transparent) !important;
+}
+
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-button.active,
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-button-box.active,
+body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-tab-row.active {
+  background: color-mix(in srgb, var(--wb-accent) 26%, transparent) !important;
+}
+
+/* 侧边栏磨砂玻璃（覆盖上面的 transparent） */
+[data-view-id=sidebar] {
+  background: color-mix(in srgb, var(--wb-glass) 70%, transparent) !important;
+  border-right: 1px solid color-mix(in srgb, var(--wb-accent) 45%, transparent) !important;
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+
+/* 主内容区：透出 body 底图，底部轻微渐变保证内容可读 */
+[data-view-id=main-content] {
+  background: linear-gradient(180deg, transparent 0 40%, color-mix(in srgb, var(--wb-glass) 58%, transparent) 100%) !important;
+}
+
+/* 详情面板半透明磨砂 */
+[data-view-id=detail-panel] {
+  background: color-mix(in srgb, var(--wb-glass) 70%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+/* brand 文案（copy 为空时不显示） */
+#root::before {
+  position: fixed;
+  z-index: 20;
+  top: 60px;
+  left: max(300px, 22vw);
+  content: {{brand}};
+  color: var(--wb-accent);
+  font: 800 clamp(16px, 2vw, 30px)/1.2 ui-rounded, system-ui;
+  text-shadow: 0 2px 10px white;
+  pointer-events: none;
+}
+
+/* headline 文案 */
+#root::after {
+  position: fixed;
+  z-index: 20;
+  top: 104px;
+  left: max(300px, 22vw);
+  max-width: 42vw;
+  content: {{headline}};
+  color: var(--wb-text);
+  font: 750 clamp(18px, 2.7vw, 42px)/1.15 ui-rounded, system-ui;
+  text-shadow: 0 2px 12px white;
+  pointer-events: none;
+}

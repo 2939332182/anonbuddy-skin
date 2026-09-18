@@ -5,8 +5,8 @@ export const PRODUCT_ID = "workbuddy-skin-studio";
 export const PRODUCT_NAME = "WorkBuddy Skin Studio";
 export const STATE_SCHEMA_VERSION = 1;
 export const THEME_SCHEMA_VERSION = 1;
-export const DEFAULT_THEME_ID = "miku-light";
-export const DEFAULT_CDP_PORT = 9223;
+export const DEFAULT_THEME_ID = "miku-488137";
+export const DEFAULT_CDP_PORT = 9333;
 export const EXPECTED_BUNDLE_ID = "com.workbuddy.workbuddy";
 
 // WorkBuddy renderer target 的 URL 特征：app.asar/renderer/index.html
