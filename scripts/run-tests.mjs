@@ -62,6 +62,7 @@ const SUITES = {
       { file: "test-settings-panel.mjs", why: "改了设置面板集成 / 悬浮图标开关 / 面板皮肤列表" },
       { file: "test-theme-switch-perf.mjs", why: "改了 applyMode / 深浅色类切换 / 设置界面配色与对比度" },
       { file: "test-popover-contrast.mjs", why: "改了浮层（个人中心菜单/下拉/右键菜单）底色或文字色" },
+      { file: "test-appearance-linkage.mjs", why: "改了外观联动 / applyMode / data-skin 契约 / 浅色禁用深色规则" },
     ],
   },
   menu: {

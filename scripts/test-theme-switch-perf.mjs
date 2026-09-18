@@ -262,8 +262,35 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
 }
 
 // ---- 收尾：还原到测试开始时的主题 ----
+// ⚠️ 不能再用 t.applyLast() 来还原：本测试中途 setTheme(deepTheme) 已经把
+// "上次用的主题"（workbuddySkinLastTheme）改写成了 wuthering-echo，
+// 而 applyLast() 读的正是那个键 —— 结果"还原"成的是本测试最后切到的主题，
+// 不是测试开始时的主题。基线恰好是 wuthering-echo 时才碰巧通过（潜伏 bug，2026-09-19 修）。
+// 正确做法：直接按 initialTheme 还原，并把被本测试改写的 localStorage 键写回快照值。
 // 注意顺序：必须在 finish() 之前读，finish 会把 CDP 连接关掉。
-if (typeof t.applyLast === "function") await t.applyLast();
+const storageSnapshot = await evaluate(`(() => ({
+  lastTheme: localStorage.getItem("workbuddySkinLastTheme"),
+  scopedKeys: Object.keys(localStorage)
+    .filter((k) => k.indexOf("workbuddy.appearance.mode::") === 0)
+    .reduce((acc, k) => { acc[k] = localStorage.getItem(k); return acc; }, {}),
+}))()`);
+if (initialTheme) {
+  await evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(initialTheme)})`);
+  await sleep(400);
+} else if (typeof t.applyLast === "function") {
+  // 测试开始时就没有皮肤（initialTheme=null）：走正常恢复路径
+  await t.applyLast();
+}
+await evaluate(`(() => {
+  const s = ${JSON.stringify(storageSnapshot)};
+  const restoreKey = (k, v) => { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); };
+  restoreKey("workbuddySkinLastTheme", s.lastTheme);
+  for (const k of Object.keys(localStorage)) {
+    if (k.indexOf("workbuddy.appearance.mode::") === 0 && !(k in s.scopedKeys)) localStorage.removeItem(k);
+  }
+  for (const [k, v] of Object.entries(s.scopedKeys)) localStorage.setItem(k, v);
+  return true;
+})()`);
 const finalTheme = await t.currentThemeId();
 check(
   "收尾：主题已还原到测试开始时的值",

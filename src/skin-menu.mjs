@@ -292,8 +292,15 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   };
 
   // 同步切换 WorkBuddy 的 VS Code 主题模式，让原生控件（输入框/按钮等）跟着深浅色变
+  // 记录当前皮肤底色：浅色护栏的兜底纠正需要它来重算
+  let activeSurface = null;
+  // 皮肤是否正在接管外观。false = 用户选了「原生」/ 皮肤已卸下，
+  // 此时必须把 data-skin 撤掉、浅色锁解开，让 WorkBuddy 自带外观重新自理。
+  // （声明必须早于 applyMode 的首次调用；真正的赋值在 setTheme / clearTheme / applyCustomTheme）
+  let skinOwned = true;
   const applyMode = (surface) => {
     const dark = !isLightSurface(surface);
+    activeSurface = surface;
     const body = document.body;
     const html = document.documentElement;
     if (body.dataset.vscodeThemeKind !== (dark ? "vscode-dark" : "vscode-light")) {
@@ -306,7 +313,244 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (html.style.colorScheme !== wantScheme) html.style.colorScheme = wantScheme;
     syncModeClasses(body, dark);
     syncModeClasses(html, dark);
+    // 换肤即换外观：把同一个深浅决定同步给 WorkBuddy 自带的外观系统
+    // （applyMode 是所有主题切换路径的唯一汇合点，见 setTheme / applyCustomTheme / clearTheme）
+    // skinOwned=false（用户选了「原生」）时不写 data-skin、不改持久化 —— 那时代管权已交还原生。
+    if (skinOwned) syncAppearance(dark);
   };
+
+  // ==================== 与 WorkBuddy 自带「外观（浅色/深色）」联动 ====================
+  //
+  // 【为什么要做这件事】
+  // 皮肤只换 CSS 变量与底色，WorkBuddy 自带的「外观」是另一套完全独立的系统：
+  //   - localStorage 'agent-ui-theme'（旧版全局配置）
+  //   - localStorage 'workbuddy.appearance.mode::<accountType>::<eid>::<uid>'（账号维度）
+  //   - localStorage 'workbuddy.appearance.lastApplied'（外观面板落下的快照）
+  //   - 以及原生 ThemeManager 对 DOM 的写入（见下）
+  // 两边都往同一批「输出」上写，于是会打架：
+  //   body/html 的 light|cb-light|vscode-light（或 dark 三件套）、
+  //   body[data-vscode-theme-kind]、body[data-vscode-theme-name]、
+  //   html[data-theme]、html.style.colorScheme
+  // 皮肤是「浅色主题 + 原生深色」时，原生深色把 foundation 的 .dark token 叠上来，
+  // 皮肤 CSS 明明加载了界面却发暗；反之亦然。所以要求：**换肤即换外观，只有一个主导者**。
+  //
+  // 【原生给我们的现成接口：'data-skin'】
+  // 反编译 asar 可见原生自己也有一套「个性皮肤」（SkinManager + ThemeManager）：
+  //   - SkinManager.applyTheme() → 写 '<html data-skin="<resourceKey>">' + 'clearThemeClasses()'
+  //   - ThemeManager.applyTheme({ skipWhenSkinActive: true }) → 若 '<html>' 有 'data-skin' 就直接 return
+  //   - ThemeManager 的 MutationObserver（syncThemeClassesFromAttribute）→ 开头
+  //     'if (document.documentElement.hasAttribute("data-skin")) return;'
+  //   - 还有公开方法 'overrideThemeForSkin("light")'，让 React 侧 useTheme() 跟随
+  // 实测确认（scripts/_probe-appearance-observer.mjs）：
+  //   · 无 data-skin 时手改 body[data-vscode-theme-kind] → 原生观察器**自动把类名同步过去**
+  //   · 有 data-skin 时同样的写入被原生**忽略**（提前 return）
+  // 也就是说：**打上 'data-skin' 就等于向原生声明「界面配色由皮肤接管」**，原生会主动让位。
+  // 这正是我们需要的「覆盖在原生外观逻辑之上」，而且不需要猴子补丁任何原生函数。
+  //
+  // 【但 skin.css 里所有原生深色规则的选择器都带 'body.vscode-light' / 'body.cb-light'】
+  // 所以类名**不能**交给原生去写深色 —— 那样皮肤自己的 '.vscode-dark' 规则会反过来命中。
+  // 结论：'data-skin' 只用来「关掉原生的自动同步」，真正的类名由 applyMode() 按主题深浅自己写。
+  // 两者配合 = 皮肤永远赢。
+  //
+  // 【组件级深浅仍要跟原生保持一致】
+  // 原生 ThemeManager.overrideThemeForSkin(mode) 会更新 currentConfig + 通知 useTheme()，
+  // 有些组件（含原生个性皮肤路径）靠它决定内部深浅。我们以「只调用、不依赖」的方式接上：
+  // 抓得到就调（让组件跟随皮肤），抓不到也绝不能因为少调一次而抛错 —— 见下面 try/catch。
+  // 注意：拿不到模块作用域里的 themeManager 实例，但 React root 的 fiber 上存着
+  // provider 的 context 值；用 fiber 遍历找到 { theme } context 并 mock 出同样的方法。
+
+  // 实例是否已卸载：本段的轮询回调要靠它变空操作（真正的赋值在下方 dispose 一带，
+  // 这里先声明是因为下面的 interval 闭包里会读它）
+  let stopped = false;
+
+  const readAccountScopedModeKey = () => {
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key.indexOf("workbuddy.appearance.mode::") === 0 && key.indexOf("legacy-snapshot") === -1) return key;
+      }
+    } catch {}
+    return null;
+  };
+
+  // 找到原生 ThemeManager 的 context 值（带 overrideThemeForSkin / setTheme / getTheme）
+  const findNativeThemeContext = () => {
+    const root = document.getElementById("root");
+    if (!root) return null;
+    // React 把 fiber 挂在容器元素的这个属性上（17/18 都是 __reactContainer$xxx）
+    const containerKey = Object.keys(root).find((k) => k.indexOf("__reactContainer$") === 0);
+    let fiber = containerKey ? root[containerKey] : null;
+    if (!fiber) return null;
+    // 找 current 指向的树
+    fiber = fiber.current ?? fiber;
+    const seen = new Set();
+    const queue = [fiber];
+    const hookFiber = (node) => {
+      if (!node || typeof node !== "object" || seen.has(node) || seen.size > 4000) return null;
+      seen.add(node);
+      const deps = node.dependencies;
+      const ctx = deps && deps.firstContext;
+      if (ctx) {
+        let c = ctx;
+        let guard = 0;
+        while (c && guard < 40) {
+          const v = c.memoizedValue;
+          if (v && typeof v.overrideThemeForSkin === "function") return v;
+          c = c.next; guard += 1;
+        }
+      }
+      return null;
+    };
+    while (queue.length) {
+      const node = queue.shift();
+      const hit = hookFiber(node);
+      if (hit) return hit;
+      if (node.child) queue.push(node.child);
+      if (node.sibling) queue.push(node.sibling);
+    }
+    return null;
+  };
+
+  // 把「皮肤决定的深浅」同步给 WorkBuddy 自带的外观系统。
+  // 顺序很重要：先打 data-skin（关掉原生自动同步）→ 再写类名（皮肤自己说了算）→ 最后持久化。
+  const syncAppearance = (dark) => {
+    const mode = dark ? "dark" : "light";
+
+    // ① 声明皮肤接管：原生 ThemeManager 见到 data-skin 就不再自写深浅
+    if (document.documentElement.getAttribute("data-skin") !== "wb-skin-studio") {
+      document.documentElement.setAttribute("data-skin", "wb-skin-studio");
+    }
+
+    // ② 账号维度偏好：换肤即换外观，让原生下次冷启动读到一致的初值
+    const scopedKey = readAccountScopedModeKey();
+    if (scopedKey) {
+      try {
+        if (localStorage.getItem(scopedKey) !== mode) localStorage.setItem(scopedKey, mode);
+      } catch {}
+    }
+
+    // ③ 组件级深浅：让 useTheme() 跟随（拿不到就静默跳过，绝不影响换肤本身）
+    try {
+      const ctx = findNativeThemeContext();
+      if (ctx && typeof ctx.overrideThemeForSkin === "function") ctx.overrideThemeForSkin(mode);
+    } catch {}
+
+    // ④ 浅色主题护栏：皮肤是浅色时，把「外观=深色」这个状态本身消掉，并锁住入口
+    enforceLightGuard(!dark);
+  };
+
+  // 交还外观控制权（用户选了「原生」，或皮肤被卸下）：
+  // 撤掉 data-skin 让原生 ThemeManager 恢复自理，解开浅色锁，
+  // 并把 DOM 恢复到用户上次在原生外观面板里选的那个深浅。
+  // 注意方向必须反着来：先解除皮肤接管，再让原生自己写，否则会被我们的类名盖住。
+  const releaseAppearanceOwnership = () => {
+    document.documentElement.removeAttribute("data-skin");
+    enforceLightGuard(false);
+    const scopedKey = readAccountScopedModeKey();
+    let mode = "light";
+    try {
+      const stored = scopedKey ? localStorage.getItem(scopedKey) : null;
+      if (stored === "dark" || stored === "light") mode = stored;
+      else {
+        // 账号维度 key 缺失时退回旧版全局配置（原生自己也这么兜底）
+        const legacy = JSON.parse(localStorage.getItem("agent-ui-theme") ?? "null");
+        if (legacy && typeof legacy === "object") {
+          if (legacy.followSystem) {
+            mode = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          } else if (legacy.theme === "dark" || legacy.theme === "light") mode = legacy.theme;
+        }
+      }
+    } catch {}
+    try {
+      const ctx = findNativeThemeContext();
+      if (ctx && typeof ctx.overrideThemeForSkin === "function") ctx.overrideThemeForSkin(mode);
+    } catch {}
+  };
+
+  // ---- 浅色主题下的「深色禁用」规则 ----
+  // 需求：当皮肤是浅色系时，禁止把外观切成深色。
+  // 做法分三层，缺一不可：
+  //   1) 视觉层：给「深色」按钮加禁用态（半透明 + not-allowed），并把当前态指回浅色
+  //   2) 行为层：捕获阶段拦截 pointerdown/click，吞掉事件（原生按钮没有 disabled 概念，
+  //      只能由我们拦；用捕获阶段才抢在 React 的委托监听之前）
+  //   3) 兜底层：万一被别处（快捷键 / 原生 setTheme）切成深色，观察 body 的
+  //      data-vscode-theme-kind 把它按回浅色 —— 但**只在浅色皮肤生效期间**，
+  //      否则会在原生皮肤模式下误伤用户自己的选择。
+  const LIGHT_GUARD_ATTR = "data-wb-light-lock";
+  let guardActive = false;
+
+  const themeOptionButtons = () => [...document.querySelectorAll(".user-menu-popover .user-menu-theme-option")];
+
+  const syncLightGuardUi = () => {
+    const options = themeOptionButtons();
+    if (!options.length) return;
+    for (const el of options) {
+      const isDarkOption = !/浅色|Light/i.test(el.textContent || "");
+      if (!guardActive || !isDarkOption) {
+        if (el.dataset.wbLightLock === "1") {
+          el.removeAttribute("data-wb-light-lock");
+          el.style.removeProperty("opacity");
+          el.style.removeProperty("cursor");
+          el.style.removeProperty("pointer-events");
+          el.removeAttribute("aria-disabled");
+          el.removeAttribute("title");
+        }
+        continue;
+      }
+      if (el.dataset.wbLightLock === "1") continue;
+      el.dataset.wbLightLock = "1";
+      // ⚠️ 不能只写 pointer-events:none —— 那样连捕获阶段的监听器也收不到事件；
+      // 我们要的是「收得到但吞掉」，所以只做视觉禁用，拦截交给监听器。
+      el.style.opacity = "0.4";
+      el.style.cursor = "not-allowed";
+      el.setAttribute("aria-disabled", "true");
+      el.setAttribute("title", "当前皮肤为浅色系，已禁用深色外观");
+    }
+  };
+  const enforceLightGuard = (on) => {
+    guardActive = Boolean(on);
+    if (guardActive) document.documentElement.setAttribute(LIGHT_GUARD_ATTR, "1");
+    else document.documentElement.removeAttribute(LIGHT_GUARD_ATTR);
+    syncLightGuardUi();
+  };
+
+  // 捕获阶段吞掉对「深色」按钮的点击（原生按钮是 <button type=button>，没有 disabled）
+  const onGuardCapture = (event) => {
+    if (!guardActive) return;
+    const target = event.target instanceof Element ? event.target.closest(".user-menu-theme-option") : null;
+    if (!target) return;
+    if (/浅色|Light/i.test(target.textContent || "")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  document.addEventListener("pointerdown", onGuardCapture, true);
+  document.addEventListener("click", onGuardCapture, true);
+
+  // 个人中心浮层是 React portal，点了才挂载，每次都是新节点。
+  // 光靠 600ms 轮询会在「刚打开就操作」的窗口里闪一下未同步的按钮，
+  // 所以再挂一个只盯 <body> 直接子节点增减的轻量观察器 —— 浮层出现时**立刻**刷一次。
+  // （只 observe childList 不 observe subtree：portal 是 body 的直接子节点，
+  //   这样不会把弹窗内部的频繁渲染也拉到回调里来。）
+  const guardUiObserver = new MutationObserver(() => {
+    if (stopped) return;
+    if (!guardActive) return;
+    if (document.querySelector(".user-menu-popover")) syncLightGuardUi();
+  });
+  guardUiObserver.observe(document.body, { childList: true });
+
+  // 兜底：外观被别处切成深色时按回浅色（仅在浅色皮肤生效期间）
+  let guardWatchTimer = null;
+  const startGuardWatch = () => {
+    if (guardWatchTimer !== null) return;
+    guardWatchTimer = setInterval(() => {
+      if (stopped || !guardActive) return;
+      if (document.body.getAttribute("data-vscode-theme-kind") === "vscode-dark") {
+        applyMode(activeSurface ?? "#ffffff");
+      }
+      syncLightGuardUi();
+    }, 600);
+  };
+
   // ---- 记住上次用的主题：重启后由 apply --theme last 自动恢复（自定义主题也能恢复）----
   const LAST_KEY = "workbuddySkinLastTheme";
   const NATIVE_MARK = "__native__";
@@ -326,6 +570,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (custom) { applyCustomTheme(custom); return; }
     const theme = data.themes.find((candidate) => candidate.id === id);
     if (!theme) return;
+    skinOwned = true;
     style.textContent = theme.css;
     document.documentElement.dataset.workbuddySkin = theme.id;
     applyMode(theme.surface);
@@ -333,8 +578,12 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     writeLastTheme(theme.id);
   };
   const clearTheme = () => {
+    // 交还给 WorkBuddy 自带外观：撤掉 data-skin（让原生 ThemeManager 恢复自理）、
+    // 解开浅色锁，并把外观状态恢复成用户上次在原生面板里选的那个。
+    skinOwned = false;
     style.textContent = "";
     delete document.documentElement.dataset.workbuddySkin;
+    releaseAppearanceOwnership();
     applyMode("#ffffff");
     paint(null);
     writeLastTheme(NATIVE_MARK);
@@ -437,6 +686,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   };
 
   const applyCustomTheme = (theme) => {
+    skinOwned = true;
     style.textContent = buildCustomCss(theme.dataUrl, theme.colors, theme.id);
     document.documentElement.dataset.workbuddySkin = theme.id;
     applyMode(theme.colors.surface);
@@ -655,7 +905,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 节流：MutationObserver 在 React 渲染期会疯狂回调，合并到下一帧统一处理
   // stopped：实例被 dispose 后，已经排进队列的 rAF / interval 回调必须变成空操作，
   // 否则旧实例会在新实例（或 restore 之后）把标题又拆一次。
-  let stopped = false;
+  // （声明位置故意靠前：外观联动那段的 interval 回调也要读它）
   let copyScheduled = false;
   const scheduleCopy = () => {
     if (stopped || copyScheduled) return;
@@ -725,6 +975,16 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     pluginEntry = null;
     settingsPane = null;
     pluginEntryActive = false;
+    // 外观联动：监听器与轮询必须一起收掉。否则旧实例的捕获监听器还挂在 document 上，
+    // 「浅色禁用深色」会叠加多份（虽然幂等，但 stopped 之后的行为不可预期），
+    // 护栏轮询也会一直被旧实例继续跑。
+    document.removeEventListener("pointerdown", onGuardCapture, true);
+    document.removeEventListener("click", onGuardCapture, true);
+    guardUiObserver.disconnect();
+    if (guardWatchTimer !== null) { clearInterval(guardWatchTimer); guardWatchTimer = null; }
+    // 卸载时把「皮肤接管」的声明撤掉，并解除浅色锁，让原生外观恢复自理
+    enforceLightGuard(false);
+    document.documentElement.removeAttribute("data-skin");
   };
 
   // 历史自定义主题全部还原成菜单行（按上传顺序，排在「＋ 自定义图片」上面）
@@ -871,6 +1131,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   else if (preferred !== null && canApplyTheme(preferred)) setTheme(preferred);
   else if (data.activeId === null) clearTheme();
   else setTheme(data.activeId);
+
+  // 浅色护栏的轮询与个人中心浮层的按钮同步：
+  //   ① 轮询兜底（600ms）负责"被别处切成深色时按回浅色"，并持续刷新按钮禁用态 ——
+  //      个人中心浮层是 React portal，每次打开都是新节点，没有稳定的挂载时机可观察；
+  //      用低压轮询比 MutationObserver 监听整个 body 便宜得多（浮层按需出现，不是热路径）；
+  //   ② stopped 后回调变空操作（见 dispose）。
+  if (activeSurface !== null && isLightSurface(activeSurface)) enforceLightGuard(true);
+  startGuardWatch();
 
   // ==================== 设置面板集成 ====================
   // 在 WorkBuddy 设置面板（.settings-modal-overlay）左侧「功能」分组里插一个
@@ -1366,6 +1634,29 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     },
     // 重新 apply 前先收掉上一个实例：只删 DOM 节点不够，旧观察器/定时器还活着
     dispose,
+    // ---- 与 WorkBuddy 自带「外观（浅色/深色）」的联动（供测试与脚本化调用）----
+    appearance: {
+      /** 当前外观是深色还是浅色（由皮肤底色决定，不读原生状态） */
+      mode: () => (activeSurface !== null && !isLightSurface(activeSurface) ? "dark" : "light"),
+      /** 浅色皮肤是否正在锁住「深色」外观 */
+      locked: () => guardActive,
+      /** 皮肤是否已声明接管原生外观（写进 <html data-skin>） */
+      owns: () => document.documentElement.getAttribute("data-skin") === "wb-skin-studio",
+      /** 账号维度外观偏好 key（可能是 null：还没登录 / 没跑过外观面板） */
+      scopedKey: readAccountScopedModeKey,
+      /** 手动把外观同步一次（幂等，给脚本/测试用） */
+      sync: () => {
+        if (activeSurface !== null) applyMode(activeSurface);
+        return document.body.getAttribute("data-vscode-theme-kind");
+      },
+      /** 读原生外观状态（用于诊断：皮肤有没有真的覆盖住原生） */
+      native: () => ({
+        kind: document.body.getAttribute("data-vscode-theme-kind"),
+        name: document.body.getAttribute("data-vscode-theme-name"),
+        colorScheme: document.documentElement.style.colorScheme,
+        themeAttr: document.documentElement.getAttribute("data-theme"),
+      }),
+    },
     aliases: () => ({ ...aliases }),
     customThemes: () => customThemes.map(({ id, name }) => ({ id, name })),
     lastTheme: () => readLastTheme(),

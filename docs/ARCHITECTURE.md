@@ -73,6 +73,7 @@ hero.webp  ─┼─> injector.applySkin
 | 改**设置面板集成**（插件条目 / 面板皮肤列表 / 悬浮图标开关） | `--suite ui`（含 `test-settings-panel`） | ~35s |
 | 改 `applyMode` / 深浅色类切换 / 设置界面配色 | `--suite ui`（含 `test-theme-switch-perf`） | ~45s |
 | 改**浮层底色或文字色**（个人中心菜单 / 下拉 / 右键菜单） | `--suite ui`（含 `test-popover-contrast`，**必须**） | ~60s |
+| 改**外观联动**（`applyMode` / `data-skin` 契约 / 浅色禁用深色 / 交还控制权） | `--suite ui`（含 `test-appearance-linkage`，**必须**） | ~50s |
 | 改 `scripts/*.ps1` | `npm run test:static` | 秒级 |
 | 改 `package.json` / 新增脚本 | `npm run test:static` | 秒级 |
 | 发版前 / 大重构 | `npm run test:all` | ~2min |
@@ -272,6 +273,88 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 以后上传任何深黑色主题都会被自动覆盖。
 已用"注入样式复现原 bug"的方式验证过这个测试**真的会变红**（不是空跑）。
 
+### ⚠️ 与 WorkBuddy 自带「外观（浅色/深色）」联动（2026-09-19）
+
+**需求**：切浅色系皮肤 → 外观自动浅色；切深色系皮肤 → 外观自动深色；
+浅色系皮肤生效期间**禁止**把外观切成深色。
+
+**为什么必须联动**：皮肤与自带外观是两套独立系统，但**写同一批 DOM 输出**：
+
+| 输出 | 谁在写 |
+|---|---|
+| `body` / `html` 的 `light`·`cb-light`·`vscode-light`（或 dark 三件套） | 原生 ThemeManager + 皮肤的 `applyMode()` |
+| `body[data-vscode-theme-kind]` / `[data-vscode-theme-name]` | 同上（**注意 dataset 与 getAttribute 是同一个属性**） |
+| `html[data-theme]` / `html.style.colorScheme` | 同上 |
+
+同时生效就会打架：皮肤是浅色而原生是深色时，foundation 的 `.dark` 选择器
+把深色 token 叠上来，**皮肤 CSS 明明加载了界面却发暗**。
+
+**根因与现成接口（从 asar 反编译得到）**：WorkBuddy 自己也有一套「个性皮肤」，
+而且已经定义了**皮肤优先于外观**的契约：
+
+- `SkinManager.applyTheme()` → 写 `<html data-skin="<resourceKey>">` + `clearThemeClasses()`
+- `ThemeManager.applyTheme({ skipWhenSkinActive: true })` → 见 `data-skin` 直接 return
+- `ThemeManager` 的 `MutationObserver`（`syncThemeClassesFromAttribute`）→ 开头
+  `if (document.documentElement.hasAttribute("data-skin")) return;`
+- 还有公开方法 `overrideThemeForSkin(mode)`，通知 React 侧 `useTheme()` 跟随
+
+**实测验证**（这是设计的地基，别凭猜测改）：
+
+| 场景 | 原生观察器的行为 |
+|---|---|
+| **无** `data-skin`，手改 `body[data-vscode-theme-kind]` | **自动把类名同步过去**（自我修复看门狗） |
+| **有** `data-skin`，同样的写入 | **被忽略**（提前 return，让位给皮肤） |
+| **有** `data-skin`，只手改类名 | 我们的写入**不被回滚**（`applyMode` 安全） |
+
+也就是说：**打下 `data-skin` 等于向原生声明"界面配色由皮肤接管"**，原生主动让位 ——
+这就是"覆盖在原生外观逻辑之上"，而且**不需要猴子补丁任何原生函数**。
+
+> ⚠️ 但类名**不能**交给原生去写深色：`skin.css` 里所有原生深色规则的选择器
+> 都带 `body.vscode-light` / `body.cb-light`，原生写深色会让**皮肤自己的**
+> `.vscode-dark` 规则反过来命中。
+> 所以分工是：`data-skin` 只负责"关掉原生自动同步"，**真正的类名由 `applyMode()` 自写**。
+
+**持久化**：原生把偏好存在账号维度 key
+`workbuddy.appearance.mode::<accountType>::<eid>::<uid>`（本机实测值
+`...::personal::personal::<uuid>`），旧版全局 key 是 `agent-ui-theme`。
+**实测：直接写这个 key 不会驱动原生 UI**（key 变了、DOM 没动）——
+它只是"下次冷启动读到什么"的持久化，**不是触发通道**。触发只能靠写 DOM/类名。
+
+**实现落点**（都在 `src/skin-menu.mjs`）：
+
+1. `syncAppearance(dark)` —— 在 `applyMode()` 末尾调用（`applyMode` 是**所有**主题切换路径的
+   唯一汇合点：`setTheme` / `applyCustomTheme` / `clearTheme`）。依次做四件事：
+   ① 打 `data-skin="wb-skin-studio"`；② 写账号维度 key；③ 调原生 `overrideThemeForSkin(mode)`；
+   ④ 同步浅色护栏。
+2. **浅色护栏**（`enforceLightGuard`）三层，缺一不可：
+   - **视觉**：「深色」按钮加 `data-wb-light-lock="1"` + `opacity:.4` + `cursor:not-allowed` + `aria-disabled`
+   - **行为**：捕获阶段监听 `pointerdown`/`click`，`stopImmediatePropagation` 吞掉
+     ⚠️ **不能用 `pointer-events:none` 挡** —— 那样连捕获监听器也收不到事件，就没法区分
+     "被禁用"和"点了没反应"；要的是"收得到但吞掉"
+     （原生这两个按钮是纯 `<button>`，**没有 disabled 概念**，只能我们拦）
+   - **兜底**：600ms 轮询，若 `data-vscode-theme-kind` 变成 `vscode-dark` 就 `applyMode` 按回去
+     （只在浅色皮肤生效期间；否则会误伤用户自己在原生模式下的选择）
+3. **交还控制权**（`releaseAppearanceOwnership`）—— 用户选「原生」时 `clearTheme()` 调用：
+   撤 `data-skin`、解护栏、把 DOM 恢复成账号维度 key 里的深浅。
+   ⚠️ **顺序必须反着来**：先解除接管再让原生写，否则会被我们的类名盖住。
+   **这是联动最危险的副作用**：漏了它就再也切不动原生外观了。
+4. 浮层按钮是 React portal，**每次打开都是新节点**：除了 600ms 轮询，
+   还挂了一个只 `observe(document.body, {childList:true})`（**不 observe subtree**）
+   的观察器，浮层一出现立刻刷按钮态，避免"刚打开就操作"的窗口期闪一下未同步状态。
+
+**回归测试**：`scripts/test-appearance-linkage.mjs`（34 项断言）
+覆盖：深色/浅色主题 → 外观跟随、类名无残留、持久化、护栏生效、点击被拦、
+切深色后解禁、外部强改后自动纠回、`data-skin` 契约仍在、**选「原生」后交还控制权**。
+已用"注释掉 `syncAppearance` 调用"的方式验证过它会**真变红**（5 项失败）。
+
+> ⚠️ **跨测试干扰（踩过）**：`setTheme` 会顺带改写 `workbuddySkinLastTheme`，
+> 而 `test-theme-switch-perf` 之类用 `applyLast()` 还原 —— 读的正是这个键。
+> 新测试必须**快照并还原** `workbuddySkinLastTheme` 与账号维度 key，否则会把下一个测试的
+> "起始主题"改成自己最后切到的那个。
+> （同一个坑也让 `test-theme-switch-perf` 自己的还原断言潜伏失效了很久：
+> 它中途 `setTheme(deepTheme)` 后再 `applyLast()`，还原到的是**自己刚切的**主题。
+> 基线恰好是 `wuthering-echo` 时才碰巧通过 —— 已改成按 `initialTheme` 显式还原。）
+
 ---
 
 ## 四、别改坏的几个不变量
@@ -317,6 +400,12 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
      这让"跑整套"和"单跑一个"的前置状态一致，测试不再依赖执行顺序；
   ② 制造浮层的测试自己收尾关掉它并断言已关（`test-settings-panel` 的「收尾：设置面板已关闭」）。
   新增会开浮层的测试时，记得把选择器加进 `BLOCKING_OVERLAYS`。
+- **别只还原"界面"，还要还原被你改过的 localStorage 键**。
+  `setTheme` 会顺带写 `workbuddySkinLastTheme`，而不少测试用 `applyLast()` 还原 —— 读的正是这个键。
+  漏了就变成"我最后切到哪，下一个测试就从哪开始"（实测：`test-theme-switch-perf` 报
+  `主题已还原到测试开始时的值 -> wuthering-echo vs genshin-dawn`）。
+  做法：测试开头快照相关键（`workbuddySkinLastTheme`、`workbuddy.appearance.mode::*`），
+  收尾**先按已知主题显式还原、再把快照写回**（顺序不能反：还原动作本身会再次改写那个键）。
 - **用户可拖拽/可改的值不要断言具体数值**，断言不变量
   （如"贴边距离跨窗口尺寸保持不变"）。
 - **读带 `transition` 的属性要等过渡结束**，否则拿到动画中间值，看起来像"规则没生效"。
@@ -368,3 +457,18 @@ node scripts/sel-of.mjs "var(--wb-bg-content)"   # 谁用了这个变量
 **不要用 renderer 的 canvas 做图像处理**。CDP `Runtime.evaluate` 超时后会在页面里
 留下挂起的 `img.decode()` 把解码队列堵死（1×1 小图要 3.2 秒），连带 `Page.captureScreenshot` 卡住。
 图像裁剪/预览一律走 Python + Pillow（`scripts/crop-icon.py` / `icon-preview.py`）。
+
+---
+
+## 九、已知问题（与本项目代码无关，别重复排查）
+
+以下是 **2026-09-19 确认**的、在**干净工作区**（`git stash` 后）同样复现的失败，
+属于本机环境 / 用户数据状态问题，不是回归：
+
+| 测试 | 现象 | 判断 |
+|---|---|---|
+| `test-window-layout` | 「当前贴边距离与存储的锚点一致」`59 vs dx=21` | 用户 `workbuddySkinMenuPos` 里的锚点与实际渲染位置不一致（历史遗留数据）。**干净树同样失败** |
+| `test-menu-icon` / `test-drag` | `AFTER=null`，`saved=null` | `workbuddySkinMenuPos` 为 `null` 时，拖拽后查询图标元素返回空。**干净树同样失败** |
+
+排查方法：`git stash` → `node apply-now.mjs` → 单跑该测试。
+若干净树也红，就是环境问题；否则才是自己的回归。
