@@ -2,15 +2,33 @@
   "name": "workbuddy-skin-studio",
   "version": "1.0.0",
   "private": true,
+  "description": "给 WorkBuddy 桌面端换肤：注入式主题系统（不改 app.asar），带主题菜单与逐字打字标题动画",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "workbuddy-skin": "src/cli.mjs"
   },
   "scripts": {
-    "test": "node --test",
-    "doctor": "node src/cli.mjs doctor",
+    "apply": "node apply-now.mjs",
+    "apply:theme": "node src/cli.mjs apply --theme",
+    "pause": "node src/cli.mjs pause",
     "status": "node src/cli.mjs status",
     "list": "node src/cli.mjs list",
-    "apply": "node src/cli.mjs apply"
+    "create": "node src/cli.mjs create",
+    "doctor": "node src/cli.mjs doctor",
+
+    "lint": "node scripts/lint-menu.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:static": "node scripts/run-tests.mjs --suite static",
+    "test:core": "node scripts/run-tests.mjs --suite core",
+    "test:ui": "node scripts/run-tests.mjs --suite ui",
+    "test:menu": "node scripts/run-tests.mjs --suite menu",
+    "test:all": "node scripts/run-tests.mjs --suite all",
+    "test:list": "node scripts/run-tests.mjs --list",
+
+    "find": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find-workbuddy.ps1",
+    "shot": "node scripts/shot-home.mjs"
   }
 }

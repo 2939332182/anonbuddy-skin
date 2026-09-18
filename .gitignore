@@ -1,4 +1,34 @@
-.DS_Store
+# ---- 依赖 ----
 node_modules/
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 验证产物 / 截图（可再生，不进仓库）----
+outputs/
+!outputs/.gitkeep
 *.log
+
+# ---- 临时文件 ----
 /tmp/
+*.tmp
+scripts/_*.tmp.*
+
+# ---- 编辑器 ----
+.vscode/
+.idea/
+*.swp
+
+# ---- 本机存档 / 一次性审计产物 ----
+cleanup-audit/
+backup-desktop-scripts/
+bat-src/
+themes-removed/
+
+# ---- AI 助手本地记忆（含本机路径，不进仓库）----
+.workbuddy-ai/
+
+# 与本项目无关的笔记
+/docs/*.html

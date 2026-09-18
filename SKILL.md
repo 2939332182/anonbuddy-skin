@@ -12,7 +12,7 @@ description: >-
 # WorkBuddy Skin Studio
 
 Reversible WorkBuddy desktop theming through local CDP injection. The tool
-restarts WorkBuddy with `--remote-debugging-port=9223`, discovers its renderer
+restarts WorkBuddy with `--remote-debugging-port=9333`, discovers its renderer
 (`renderer/index.html`), and injects CSS + a 🎨 theme menu into the live UI.
 No official files are touched.
 
@@ -48,7 +48,7 @@ No official files are touched.
    ./scripts/apply.command
 
    # or a specific theme via the cross-platform CLI
-   node src/cli.mjs apply --theme genshin-night
+   node src/cli.mjs apply --theme genshin-dawn
    ```
 
    `apply.command` quits WorkBuddy, relaunches it with the CDP port, waits for
@@ -72,7 +72,7 @@ No official files are touched.
    .\scripts\apply.ps1
 
    # or a specific theme
-   .\scripts\apply.ps1 -Theme genshin-night
+   .\scripts\apply.ps1 -Theme genshin-dawn
    ```
 
    If you hit an execution-policy error, run once:
@@ -83,6 +83,14 @@ No official files are touched.
 
    ```powershell
    .\scripts\find-workbuddy.ps1
+   ```
+
+   If WorkBuddy lives outside the standard install locations, set the env var once
+   instead of passing `-WorkBuddyExe` every time. It only reaches **newly opened**
+   terminals:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('WORKBUDDY_EXE', 'D:\path\to\WorkBuddyAI.exe', 'User')
    ```
 
 3. Verify:
@@ -96,14 +104,24 @@ No official files are touched.
 ## Choosing a theme
 
 - List available themes: `node src/cli.mjs list` (macOS) / same via PowerShell.
-- Built-ins include `miku-light`, `miku-488137`, `genshin-dawn`, `genshin-night`,
-  `deepspace-dawn`, `deepspace-star`, `naruto-hokage`, `naruto-sasuke`,
-  `wuthering-echo`, `wuthering-tide`.
+- Built-ins shipped in `themes/`: `miku-488137`, `genshin-dawn`, `wuthering-echo`.
+  Other presets (`miku-light`, `genshin-night`, `wuthering-tide`, `deepspace-*`,
+  `naruto-*`) were moved to `themes-removed/` — move a folder back into `themes/`
+  and re-apply to bring it back into the menu.
+- `apply --theme last` restores whatever theme the user last picked in the 🎨 menu,
+  custom uploads included. This is what the automatic paths (the login watcher and
+  `apply-now.mjs`) use by default, so a WorkBuddy restart no longer resets the user
+  back to Miku. Pass a concrete id to force one.
 - If the user names a mood/character (e.g. "dark Genshin"), map it to the
   closest id, or just apply the default and let them pick from the 🎨 menu.
 - Custom image: `node src/cli.mjs create --image "/path/to/hero.webp" --name "My Skin"`
   then `node src/cli.mjs apply --theme my-skin`. The in-app 🎨 menu also supports
-  "＋ 自定义图片" with automatic color extraction.
+  "＋ 自定义图片" with automatic color extraction; every upload is kept as its own
+  theme instead of replacing the previous one.
+- Custom launcher icon: drop a square image at `assets/menu-icon.png` (or `assets/icon.*`;
+  png / jpg / webp / gif / svg all work) and re-apply — no code change needed. It is
+  inlined as a data URL and shown in the round 38×38 button; without it the 🎨 emoji is used.
+  Verify with `node scripts/test-menu-icon.mjs`.
 
 ## Pause / restore to native
 
@@ -145,7 +163,17 @@ renderer hint `renderer/index.html`.
 - `src/cli.mjs` — entry point: `list` / `create` / `apply` / `status` / `pause` / `doctor`.
 - `src/cdp-client.mjs` — CDP connection + renderer discovery.
 - `src/skin-css.mjs` — `--cb-*` variable overrides + background + container transparency.
-- `src/skin-menu.mjs` — the 🎨 in-app menu (switch / upload / delete / native).
+- `src/skin-menu.mjs` — the 🎨 in-app menu (switch / upload / delete / rename / native).
+  Right-clicking a row opens a small menu with 重命名 / 删除 (delete only for uploaded
+  custom themes, two clicks to confirm; renames and deletions never touch `theme.json`
+  or the theme folder on disk). Custom themes live in
+  `localStorage["workbuddyCustomThemes"]` as an **array** — every upload adds an entry,
+  nothing is overwritten — and the legacy single-theme key `workbuddyCustomTheme` is
+  migrated automatically on first run. Theme display names are overridden via
+  `localStorage["workbuddySkinAliases"]` (id → display name). Scriptable through
+  `window.__workbuddySkin`: `renameTheme(id, name)` (pass `""` to restore the default,
+  `null` for the native row), `deleteCustomTheme(id)`, `importFromDataUrl(dataUrl, name)`,
+  plus `customThemes()` / `aliases()` inspectors.
 - `src/injector.mjs` — idempotent CSS+menu injection and removal.
 - `src/constants.mjs`, `src/theme-schema.mjs`, `src/theme-store.mjs` — config & theme model.
 - `scripts/apply.command` / `pause.command` — macOS launchers.
