@@ -54,6 +54,8 @@ hero.webp  ─┼─> injector.applySkin
 | `workbuddySkinLastTheme` | 上次选用的主题 id（`__native__` = 原生界面） |
 | `workbuddySkinMenuPos` | 图标位置，**贴边锚点** `{ax,dx,y}` |
 | `workbuddySkinAliases` | 显示名别名表（只改显示名，不动磁盘） |
+| `workbuddySkinIconHidden` | 悬浮图标是否隐藏（`"1"`/`"0"`；设置面板里的开关） |
+| `workbuddyCustomTheme` | **旧版遗留**，首次运行会迁移进 `workbuddyCustomThemes` 后删除 |
 
 ---
 
@@ -68,6 +70,7 @@ hero.webp  ─┼─> injector.applySkin
 | 改 `skin-menu.mjs` 的文案或动画 | `npm run lint` + `--suite core` | ~40s |
 | 改 `injector.mjs` / `removeSkin` / 收尾逻辑 | `--suite core`（**必须**，含幂等回归） | ~40s |
 | 改菜单交互（重命名/删除/上传/拖动） | `--suite menu` | ~30s |
+| 改**设置面板集成**（插件条目 / 面板皮肤列表 / 悬浮图标开关） | `--suite ui`（含 `test-settings-panel`） | ~35s |
 | 改 `scripts/*.ps1` | `npm run test:static` | 秒级 |
 | 改 `package.json` / 新增脚本 | `npm run test:static` | 秒级 |
 | 发版前 / 大重构 | `npm run test:all` | ~2min |
@@ -97,10 +100,22 @@ PowerShell 5.1 读**无 BOM 的 UTF-8** 时按 GBK 解析，中文注释会破�
 > `${env:ProgramFiles(x86)}` 必须加花括号（否则 PS 把 `(x86)` 当语法）。
 > `ForEach-Object` 里的 `return` 只结束**当前迭代**，不是"找到就返回"。
 
-### 2. 注入脚本仍是模板字符串 —— 注释里别出现反引号
+### 2. 注入脚本仍是模板字符串 —— 两类写法会把它弄坏
 
-`buildSkinMenuScript` 返回**一整坨模板字符串**。里面任何一行注释写了反引号，
-字符串就被静默截断，产物只剩前半段，报错信息还很难懂（踩过 3 次）。
+`buildSkinMenuScript` 返回**一整坨模板字符串**。模板字面量会做转义处理，所以有**两个**雷区：
+
+**(a) 注释里出现反引号** —— 字符串被静默截断，产物只剩前半段，报错信息很难懂（踩过 3 次）。
+
+**(b) 正则里的反斜杠被吃掉一层** —— 模板字面量会先把 `\s` 解析成 `s`、`\(` 解析成 `(`，
+于是生成的正则语法错误（`Invalid regular expression: ... Unterminated group`）。踩过一次。
+在模板内写正则要用**双反斜杠**，或干脆用 `[0-9]` 这类字符类绕开。同文件里已有的正确写法：
+
+```js
+// 模板内：\\. 会生成 \.  ✓
+file.name.replace(/\\.[a-z0-9]+$/i, "")
+// 模板内：[0-9] 不需要转义，最稳  ✓
+const m = /rgba?\\(([0-9]+), ([0-9]+), ([0-9]+)/.exec(bg)
+```
 
 **CSS 已经不再有这个问题**（正文移到了 `src/css/skin.css`）。
 但注入脚本还在，所以改完 `skin-menu.mjs` **务必先跑**：
@@ -110,10 +125,52 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 ```
 
 `lint-menu.mjs` 同时校验：
-- 注入脚本能被 `new Function()` 解析
+- 注入脚本能被 `new Function()` 解析（会明确提示上面两类写法）
 - `skin.css` 源文件花括号配平 / 无残留 `${}` / 占位符都已登记
-- 产物里关键能力（右键菜单、重命名、拆字、渐变对齐、`dispose`/`stopped`）没被误删
+- 产物里关键能力（右键菜单、重命名、拆字、渐变对齐、设置面板、`dispose`/`stopped`）没被误删
 - **标题绝不声明 `font-size`**（必须跟随用户的字号设置）
+
+---
+
+## 三·五、设置面板集成（ChihayaAnon 插件）
+
+插件在 WorkBuddy 设置面板里有一个自己的页面。入口与内容都由注入脚本创建，
+**不修改 `app.asar`**，卸载皮肤时一并移除。
+
+### 结构（都是原生锚点，不是哈希类名）
+
+| 元素 | 选择器 / id | 说明 |
+|---|---|---|
+| 设置弹窗根 | `.settings-modal-overlay` | 打开才存在 |
+| 左侧导航 | `.settings-navigation` | React 每次打开都会重建 |
+| 分组 | `.settings-navigation__group` + `__group-title` | 我们插进「功能」分组 |
+| 我们的条目 | `#workbuddy-skin-menu-settings-entry` | `button.settings-navigation__item` |
+| 右侧内容区 | `.settings-modal__content` | 原生面板与其同级 |
+| 原生面板 | `.settings-modal__header` / `.settings-modal__panel` | 我们**只隐藏不删除**（React 要管） |
+| 我们的面板 | `#workbuddy-skin-menu-settings-pane` | `data-wb-plugin-pane="1"` 作孤儿标记 |
+
+### 三条必须知道的约束
+
+1. **导航栏是 React 渲染的，会被重建**。我们插的条目每次打开设置都会被回收，
+   所以用 `MutationObserver` + 1.2s `setInterval` 守着补（`ensureSettingsEntry` 幂等）。
+2. **不能"接管"右侧面板**（那需要 React 路由）。做法是原生面板留在 DOM 里、只 `display:none`，
+   我们的面板盖上去；用户点别的导航项时（导航栏 `click` 捕获阶段监听）自动收起。
+3. **面板配色跟随"弹窗自身底色"，不是跟随皮肤主题**。设置弹窗是原生白色/深色实底，
+   皮肤并不给它染色。踩过的坑：按皮肤主题取色 → 选中深色皮肤时把文字设成浅色 →
+   白弹窗上白字白底 → **整个面板看起来是空的**。
+   现在 `paneSurface()` 直接读 `.settings-modal__content` 的 `computedStyle.backgroundColor` 判断深浅。
+
+### 悬浮图标开关
+
+`localStorage["workbuddySkinIconHidden"]`（`"1"`/`"0"`）。隐藏后 `button.style.display = "none"`，
+菜单面板与皮肤照常工作 —— 入口改从设置面板进。**关闭悬浮图标不会关闭皮肤。**
+
+### 去重（踩过的坑）
+
+`ensureSettingsEntry` 里有一段**按 id 全量扫描并删除孤儿节点**的防御代码。
+原因：`dispose()` 只能清掉"当前实例变量里记着的那两个节点"，
+旧版本脚本 / 异常中断留下的节点不在任何变量里，会在导航栏叠成两个同名条目、
+内容区叠成两层列表（实测出现过 3 份）。新增注入物时记得同步加进这段扫描。
 
 ---
 
