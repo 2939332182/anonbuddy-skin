@@ -2,21 +2,22 @@
 .SYNOPSIS
   WorkBuddy Skin Studio - Windows apply
 .DESCRIPTION
-  以 CDP 调试模式重启 WorkBuddy 并应用当前主题
+  Restart WorkBuddy with CDP enabled and apply the skin.
 .PARAMETER Port
-  CDP 调试端口，默认 9223
+  CDP port. Default 9333.
 .PARAMETER WorkBuddyExe
-  显式指定 WorkBuddy.exe 路径（覆盖自动探测）
+  Explicit WorkBuddy.exe path (skips auto-detection).
 .PARAMETER Theme
-  指定主题 id（默认用 miku-light）
+  Theme id to apply. Defaults to "last" = restore whatever theme the user last
+  picked in the in-app menu (custom uploads included).
 .EXAMPLE
   .\apply.ps1
-  .\apply.ps1 -Theme genshin-night
+  .\apply.ps1 -Theme genshin-dawn
   .\apply.ps1 -WorkBuddyExe "D:\apps\WorkBuddy\WorkBuddy.exe"
 #>
 [CmdletBinding()]
 param(
-  [int]$Port = 9223,
+  [int]$Port = 9333,
   [string]$WorkBuddyExe,
   [string]$Theme
 )
@@ -26,22 +27,32 @@ $Root = Split-Path -Parent $PSScriptRoot
 function Find-WorkBuddyExe {
   if ($WorkBuddyExe -and (Test-Path -LiteralPath $WorkBuddyExe)) { return $WorkBuddyExe }
   if ($env:WORKBUDDY_EXE -and (Test-Path -LiteralPath $env:WORKBUDDY_EXE)) { return $env:WORKBUDDY_EXE }
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA 'workbuddy\WorkBuddy.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Programs\workbuddy\WorkBuddy.exe'),
-    (Join-Path $env:ProgramFiles 'WorkBuddy\WorkBuddy.exe')
-  )
-  if ($env:ProgramFiles(x86)) { $candidates += (Join-Path $env:ProgramFiles(x86) 'WorkBuddy\WorkBuddy.exe') }
+  # Guard every env var: a missing one makes Join-Path throw.
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA 'workbuddy\WorkBuddy.exe')
+    $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\workbuddy\WorkBuddy.exe')
+  }
+  if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'WorkBuddy\WorkBuddy.exe') }
+  # NOTE: ${env:ProgramFiles(x86)} needs braces -- bare $env:ProgramFiles(x86) is a parse error.
+  if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'WorkBuddy\WorkBuddy.exe') }
   foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { return $c } }
-  # 注册表 Uninstall 项
+  # Registry Uninstall entries
   try {
     $keys = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+    $found = $null
     foreach ($k in $keys) {
+      if ($found) { break }
+      # NOTE: 'return' inside ForEach-Object only ends that iteration, not the function,
+      # so the hit has to be collected in a variable instead.
       Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*WorkBuddy*' -and $_.InstallLocation } | ForEach-Object {
-        $p = Join-Path $_.InstallLocation 'WorkBuddy.exe'
-        if (Test-Path -LiteralPath $p) { return $p }
+        if (-not $found) {
+          $p = Join-Path $_.InstallLocation 'WorkBuddy.exe'
+          if (Test-Path -LiteralPath $p) { $found = $p }
+        }
       }
     }
+    if ($found) { return $found }
   } catch {}
   return $null
 }
@@ -49,13 +60,18 @@ function Find-WorkBuddyExe {
 function Find-Node {
   $g = Get-Command node -ErrorAction SilentlyContinue
   if ($g) { return $g.Source }
-  $homeNode = Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions'
-  if (Test-Path $homeNode) {
-    $n = Get-ChildItem $homeNode -Directory | Sort-Object Name -Descending | Select-Object -First 1
-    if ($n) {
-      $exe = Join-Path $n.FullName 'node.exe'
-      if (Test-Path -LiteralPath $exe) { return $exe }
-    }
+  # WorkBuddy bundles node under ~/.workbuddy-ai (current) or ~/.workbuddy (older builds).
+  $roots = @(
+    (Join-Path $env:USERPROFILE '.workbuddy-ai\binaries\node\versions'),
+    (Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions')
+  )
+  foreach ($root in $roots) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    $n = Get-ChildItem $root -Directory |
+      Sort-Object Name -Descending |
+      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'node.exe') } |
+      Select-Object -First 1
+    if ($n) { return (Join-Path $n.FullName 'node.exe') }
   }
   return $null
 }
@@ -69,12 +85,12 @@ function Test-CDP([int]$P) {
 
 $exe = Find-WorkBuddyExe
 if (-not $exe) {
-  Write-Error "未找到 WorkBuddy.exe。请用 -WorkBuddyExe 参数或设置 `$env:WORKBUDDY_EXE 指向 WorkBuddy.exe"
+  Write-Error "WorkBuddy.exe not found. Pass -WorkBuddyExe or set $env:WORKBUDDY_EXE."
   exit 1
 }
 $node = Find-Node
 if (-not $node) {
-  Write-Error "未找到 node。请确保 node 在 PATH，或 WorkBuddy 自带 node 存在。"
+  Write-Error "node not found. Put node on PATH, or use the node bundled with WorkBuddy."
   exit 1
 }
 
@@ -83,23 +99,22 @@ Write-Host "Node:      $node"
 Write-Host "Port:      $Port"
 
 if (Test-CDP $Port) {
-  Write-Host "CDP 已就绪（端口 $Port），跳过重启"
+  Write-Host "CDP already up on port $Port - skipping restart"
 } else {
-  Write-Host "退出 WorkBuddy..."
+  Write-Host "Closing WorkBuddy..."
   Get-Process WorkBuddy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
-  Write-Host "以 CDP 调试模式启动（端口 $Port）..."
+  Write-Host "Starting WorkBuddy with CDP on port $Port ..."
   Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=$Port"
   $deadline = (Get-Date).AddSeconds(30)
   while (-not (Test-CDP $Port)) {
-    if ((Get-Date) -ge $deadline) { Write-Error "CDP 在 30 秒内未就绪"; exit 1 }
+    if ((Get-Date) -ge $deadline) { Write-Error "CDP not ready within 30s"; exit 1 }
     Start-Sleep -Milliseconds 400
   }
-  Write-Host "CDP 就绪"
+  Write-Host "CDP ready"
 }
 
-Write-Host "应用皮肤..."
+Write-Host "Applying skin..."
 $cli = Join-Path $Root 'src/cli.mjs'
-$applyArgs = @('apply', '--port', "$Port")
-if ($Theme) { $applyArgs += @('--theme', $Theme) }
-& $node $cli @applyArgs
+if (-not $Theme) { $Theme = 'last' }
+& $node $cli 'apply' '--port' "$Port" '--theme' $Theme

@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 APP="/Applications/WorkBuddy.app"
-PORT="${WORKBUDDY_CDP_PORT:-9223}"
+PORT="${WORKBUDDY_CDP_PORT:-9333}"
 
 # 定位 node：优先 WorkBuddy 自带，其次 PATH
 NODE=""
@@ -41,4 +41,5 @@ for i in $(seq 1 20); do
 done
 
 echo "应用皮肤..."
-exec "$NODE" src/cli.mjs apply "$@"
+# --theme last = 恢复用户上次在菜单里选用的主题；若调用方又传了 --theme，后面的会覆盖前面的
+exec "$NODE" src/cli.mjs apply --theme last "$@"

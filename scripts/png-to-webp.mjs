@@ -1,7 +1,7 @@
 // 通过 WorkBuddy renderer 的 Chromium 把 PNG 编码为 webp（sips 不支持 webp 写入）
 import { readFileSync, writeFileSync } from "node:fs";
 
-const CDP = "http://127.0.0.1:9223";
+const CDP = process.env.WB_CDP_URL ?? "http://127.0.0.1:9333";
 const inPath = process.argv[2];
 const outPath = process.argv[3];
 

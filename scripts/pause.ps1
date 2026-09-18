@@ -2,29 +2,34 @@
 .SYNOPSIS
   WorkBuddy Skin Studio - Windows pause
 .DESCRIPTION
-  暂停皮肤，恢复原生界面（不重启 WorkBuddy）
+  Remove the skin and go back to the native UI (no restart).
 .PARAMETER Port
-  CDP 调试端口，默认 9223
+  CDP port. Default 9333.
 #>
 [CmdletBinding()]
-param([int]$Port = 9223)
+param([int]$Port = 9333)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 
 function Find-Node {
   $g = Get-Command node -ErrorAction SilentlyContinue
   if ($g) { return $g.Source }
-  $homeNode = Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions'
-  if (Test-Path $homeNode) {
-    $n = Get-ChildItem $homeNode -Directory | Sort-Object Name -Descending | Select-Object -First 1
-    if ($n) {
-      $exe = Join-Path $n.FullName 'node.exe'
-      if (Test-Path -LiteralPath $exe) { return $exe }
-    }
+  # WorkBuddy bundles node under ~/.workbuddy-ai (current) or ~/.workbuddy (older builds).
+  $roots = @(
+    (Join-Path $env:USERPROFILE '.workbuddy-ai\binaries\node\versions'),
+    (Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions')
+  )
+  foreach ($root in $roots) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    $n = Get-ChildItem $root -Directory |
+      Sort-Object Name -Descending |
+      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'node.exe') } |
+      Select-Object -First 1
+    if ($n) { return (Join-Path $n.FullName 'node.exe') }
   }
   return $null
 }
 
 $node = Find-Node
-if (-not $node) { Write-Error "未找到 node。"; exit 1 }
+if (-not $node) { Write-Error "node not found."; exit 1 }
 & $node (Join-Path $Root 'src/cli.mjs') pause --port $Port

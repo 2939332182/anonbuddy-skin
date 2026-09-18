@@ -1,28 +1,41 @@
 <#
 .SYNOPSIS
-  WorkBuddy Skin Studio - 探测 WorkBuddy.exe 和 node 路径
+  WorkBuddy Skin Studio - locate WorkBuddy.exe and node.
 .DESCRIPTION
-  打印自动探测到的 WorkBuddy.exe 和 node 路径，用于排查 apply.ps1 找不到应用的问题
+  Prints the auto-detected paths of WorkBuddy.exe and node, to debug
+  "apply.ps1 cannot find the app" problems.
+  NOTE: keep this file ASCII-only. PowerShell 5.1 reads BOM-less UTF-8 as the
+  ANSI codepage, and Chinese characters break parsing.
 #>
 $ErrorActionPreference = 'Continue'
 
 function Find-WorkBuddyExe {
   if ($env:WORKBUDDY_EXE -and (Test-Path -LiteralPath $env:WORKBUDDY_EXE)) { return $env:WORKBUDDY_EXE }
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA 'workbuddy\WorkBuddy.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Programs\workbuddy\WorkBuddy.exe'),
-    (Join-Path $env:ProgramFiles 'WorkBuddy\WorkBuddy.exe')
-  )
-  if ($env:ProgramFiles(x86)) { $candidates += (Join-Path $env:ProgramFiles(x86) 'WorkBuddy\WorkBuddy.exe') }
+  # Guard every env var: a missing one makes Join-Path throw.
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA 'workbuddy\WorkBuddy.exe')
+    $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\workbuddy\WorkBuddy.exe')
+  }
+  if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'WorkBuddy\WorkBuddy.exe') }
+  # ${env:ProgramFiles(x86)} needs braces -- bare $env:ProgramFiles(x86) is a parse error.
+  if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'WorkBuddy\WorkBuddy.exe') }
   foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { return $c } }
   try {
     $keys = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+    $found = $null
     foreach ($k in $keys) {
+      if ($found) { break }
+      # NOTE: 'return' inside ForEach-Object only ends that iteration, not the function,
+      # so the hit has to be collected in a variable instead.
       Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*WorkBuddy*' -and $_.InstallLocation } | ForEach-Object {
-        $p = Join-Path $_.InstallLocation 'WorkBuddy.exe'
-        if (Test-Path -LiteralPath $p) { return $p }
+        if (-not $found) {
+          $p = Join-Path $_.InstallLocation 'WorkBuddy.exe'
+          if (Test-Path -LiteralPath $p) { $found = $p }
+        }
       }
     }
+    if ($found) { return $found }
   } catch {}
   return $null
 }
@@ -30,29 +43,34 @@ function Find-WorkBuddyExe {
 function Find-Node {
   $g = Get-Command node -ErrorAction SilentlyContinue
   if ($g) { return $g.Source }
-  $homeNode = Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions'
-  if (Test-Path $homeNode) {
-    $n = Get-ChildItem $homeNode -Directory | Sort-Object Name -Descending | Select-Object -First 1
-    if ($n) {
-      $exe = Join-Path $n.FullName 'node.exe'
-      if (Test-Path -LiteralPath $exe) { return $exe }
-    }
+  # WorkBuddy bundles node under ~/.workbuddy-ai (current) or ~/.workbuddy (older builds).
+  $roots = @(
+    (Join-Path $env:USERPROFILE '.workbuddy-ai\binaries\node\versions'),
+    (Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions')
+  )
+  foreach ($root in $roots) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    $n = Get-ChildItem $root -Directory |
+      Sort-Object Name -Descending |
+      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'node.exe') } |
+      Select-Object -First 1
+    if ($n) { return (Join-Path $n.FullName 'node.exe') }
   }
   return $null
 }
 
 $exe = Find-WorkBuddyExe
 $node = Find-Node
-Write-Host "=== WorkBuddy Skin Studio 探测结果 ==="
-Write-Host "WorkBuddy.exe: $(if ($exe) { $exe } else { '未找到' })"
-Write-Host "node:          $(if ($node) { $node } else { '未找到' })"
+Write-Host "=== WorkBuddy Skin Studio probe ==="
+Write-Host "WorkBuddy.exe: $(if ($exe) { $exe } else { '(not found)' })"
+Write-Host "node:          $(if ($node) { $node } else { '(not found)' })"
 if (-not $exe) {
   Write-Host ""
-  Write-Host "未找到 WorkBuddy.exe，请用以下方式之一指定："
-  Write-Host "  1. 设置环境变量：`$env:WORKBUDDY_EXE = 'C:\path\to\WorkBuddy.exe'"
-  Write-Host "  2. 运行 apply.ps1 时传参：.\apply.ps1 -WorkBuddyExe 'C:\path\to\WorkBuddy.exe'"
+  Write-Host "WorkBuddy.exe not found. Specify it in one of these ways:"
+  Write-Host "  1. Set the env var: `$env:WORKBUDDY_EXE = 'C:\path\to\WorkBuddy.exe'"
+  Write-Host "  2. Pass it to apply.ps1: .\apply.ps1 -WorkBuddyExe 'C:\path\to\WorkBuddy.exe'"
 }
 if (-not $node) {
   Write-Host ""
-  Write-Host "未找到 node，请安装 node.js 或确认 WorkBuddy 自带 node 路径。"
+  Write-Host "node not found. Install node.js, or check the node bundled with WorkBuddy."
 }
