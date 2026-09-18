@@ -107,18 +107,22 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
       void document.body.offsetHeight;   // 强制同步重算 + 布局
       samples.push(performance.now() - t0);
     }
-    const sorted = [...samples].sort((x, y) => x - y);
+    // 丢掉前两次：预热只做了一轮，紧接着的第一次仍会带上样式表首次编译的残余成本
+    // （实测第一次 33ms、之后稳定 ~19ms）。这两次不计入统计。
+    const kept = samples.slice(2);
+    const sorted = [...kept].sort((x, y) => x - y);
     return {
       median: sorted[Math.floor(sorted.length / 2)],
       worst: sorted[sorted.length - 1],
       samples: samples.map((v) => Math.round(v * 10) / 10),
+      keptSamples: kept.map((v) => Math.round(v * 10) / 10),
     };
   })()`);
 
   check(
     `单次切主题同步耗时中位 < ${SYNC_BUDGET_MS}ms（修复前 ~55-65ms）`,
     timing.median < SYNC_BUDGET_MS,
-    `中位 ${Math.round(timing.median * 10) / 10}ms / 最坏 ${Math.round(timing.worst * 10) / 10}ms / 样本 ${JSON.stringify(timing.samples)}`,
+    `中位 ${Math.round(timing.median * 10) / 10}ms / 最坏 ${Math.round(timing.worst * 10) / 10}ms / 计入 ${JSON.stringify(timing.keptSamples)}（原始 ${JSON.stringify(timing.samples)}）`,
   );
 
   // ---- 2. 关键回归点：applyMode 不该在"类状态已经正确"时再动 DOM ----

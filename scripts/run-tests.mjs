@@ -61,6 +61,7 @@ const SUITES = {
       { file: "test-hover.mjs", why: "改了悬停态规则" },
       { file: "test-settings-panel.mjs", why: "改了设置面板集成 / 悬浮图标开关 / 面板皮肤列表" },
       { file: "test-theme-switch-perf.mjs", why: "改了 applyMode / 深浅色类切换 / 设置界面配色与对比度" },
+      { file: "test-popover-contrast.mjs", why: "改了浮层（个人中心菜单/下拉/右键菜单）底色或文字色" },
     ],
   },
   menu: {

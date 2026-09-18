@@ -136,6 +136,75 @@ body > :not(#workbuddy-skin-menu):not([class*="popover"]):not([class*="dropdown"
   background: color-mix(in srgb, var(--wb-glass) 42%, var(--wb-surface)) !important;
 }
 
+/* ⚠️ 浮层的文字色必须跟着换（2026-09-19 踩的大坑）。
+ * 上面那条只改了底色：深色主题下底色变成 #1a1e2a，但浮层里的文字仍是原生写死的
+ * rgb(0,0,0) —— 黑字压暗底，对比度只有 1.26:1，整个个人中心菜单看着像"没渲染出来"。
+ * 浅色主题下恰好黑字压浅底，所以这个 bug 只在深色主题暴露。
+ *
+ * 修法：让浮层继承主题文字色。`color` 会自然继承给后代，但原生多处把文字色写死在
+ * 具体类上（.user-menu-item-label / -value 等），只在浮层根设 color 压不住，
+ * 所以下面再按类名兜一层。
+ * 用 `:where()` 包一层把优先级压到 0，避免压过组件自己更具体的状态色。
+ */
+.user-menu-popover,
+.wb-popover,
+[class*="-context-menu"],
+[class*="-dropdown-menu"] {
+  color: var(--wb-text) !important;
+}
+
+/* 子树兜底：原生把 item 的文字色写死在 .user-menu-item-label / -value 上，
+ * 只在浮层根设 color 压不住。这里统一改，但不碰以下几类"自带语义色"的元素。 */
+.user-menu-popover :where(.user-menu-item-label, .user-menu-item-value,
+  .user-menu-header-name-text, .user-menu-theme-option, .user-menu-credits-status),
+.wb-popover :where(.user-menu-item-label, .user-menu-item-value,
+  .user-menu-header-name-text, .user-menu-theme-option, .user-menu-credits-status) {
+  color: var(--wb-text) !important;
+}
+
+/* 次级信息（当前套餐、积分余额这类"值"）压暗一档，保留层级感又保证 ≥4.5:1。
+ * 原生的 rgba(0,0,0,.5) 即使在浅色主题下也只有 3.8:1，本来就不达标。
+ *
+ * ⚠️ 这里只能往"透明"方向混，不能往 --wb-surface 混 —— 后者会把前景拉向背景、
+ * 对比度反而变差（实测 genshin-dawn 从 4.37 掉到 3.13）。
+ * 注意 color-mix(..., transparent) 会输出 color(srgb r g b / a)，alpha 参与合成后
+ * 实际观感比预期更淡，所以比例要给得比直觉高。
+ * 82% 是按最不利主题（genshin-dawn：浅紫底 + 深蓝字）算出来的 ——
+ * 78% 恰好 5.07 勉强过线，82% 留出余量到 5.63。
+ * 新增主题若文字色与底色接近，这条比例需要重新验算。 */
+.user-menu-popover :where(.user-menu-item-value, .user-menu-credits-refresh,
+  .user-menu-item--disabled .user-menu-item-label, .user-menu-item--disabled .user-menu-item-value,
+  .user-menu-item--billing-plan .user-menu-item-label, .user-menu-item--billing-plan .user-menu-item-value) {
+  color: color-mix(in srgb, var(--wb-text) 82%, transparent) !important;
+}
+
+/* 图标沿用同一套逻辑（原生同样是写死的深色）。 */
+.user-menu-popover :where(.user-menu-item-icon, .user-menu-separator),
+.wb-popover :where(.user-menu-item-icon, .user-menu-separator) {
+  color: color-mix(in srgb, var(--wb-text) 78%, transparent) !important;
+}
+
+/* 分隔线用文字色低透明度，跟着主题走。 */
+.user-menu-popover :where(.user-menu-separator),
+.wb-popover :where(.user-menu-separator) {
+  background: color-mix(in srgb, var(--wb-text) 16%, transparent) !important;
+}
+
+/* 保留语义色：状态点（在线/加载）与主题切换滑块是"功能性颜色"，不该被主题覆盖。 */
+.user-menu-popover :where(.user-menu-credits-status--loading, .user-menu-credits-status--error,
+  .user-menu-credits-status--success) {
+  color: inherit;
+}
+
+/* 主题切换器：滑块与容器跟着主题走，否则深色下白滑块+浅字看不清。 */
+.user-menu-popover :where(.user-menu-theme-switcher) {
+  background: color-mix(in srgb, var(--wb-text) 14%, transparent) !important;
+}
+.user-menu-popover :where(.user-menu-theme-switcher-thumb) {
+  background: var(--wb-surface) !important;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--wb-text) 28%, transparent) !important;
+}
+
 /* 关键：这些容器默认有不透明底色，会完全盖住 body 背景图 */
 .teams-container,
 .teams-container.is-mac,
