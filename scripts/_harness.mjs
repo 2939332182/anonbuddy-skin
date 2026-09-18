@@ -21,6 +21,11 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_PORT = 9333;
 
+// 覆盖全屏的浮层选择器 —— 它们会拦截指针事件，让"点/悬停某行"的断言全部命不中目标。
+// 已知来源：设置弹窗（test-settings-panel 会打开它）。测试之间不该互相踩，
+// 所以每个测试启动时都兜底清一次，而不是指望"上一个测试收尾关干净了"。
+export const BLOCKING_OVERLAYS = [".settings-modal-overlay"];
+
 export const resolvePort = (argv = process.argv) =>
   Number(argv[2] || process.env.WORKBUDDY_SKIN_PORT || DEFAULT_PORT);
 
@@ -116,7 +121,6 @@ export async function createHarness(options = {}) {
     sleep,
     waitFor,
     finish,
-
     /** 轮询直到 renderer 里条件成立；未成立则返回最后一次取值 */
     waitUntil: (expr, opts) => waitFor(() => session.evaluate(expr), opts),
 
@@ -158,12 +162,71 @@ export async function createHarness(options = {}) {
     /** 卸掉皮肤 */
     removeSkin: () => removeSkin({ port }),
 
+    /**
+     * 关掉任何残留的全屏遮罩（主要就是设置弹窗）。
+     * 只做"关闭"不做别的 —— 这是测试启动时的卫生动作，不是断言。
+     * 先按 Esc，不行再对遮罩本体派发 pointerdown（原生就是这么关的）。
+     */
+    async clearBlockingOverlays() {
+      for (const selector of BLOCKING_OVERLAYS) {
+        let open = await session.evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`);
+        if (!open) continue;
+        await session.send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27,
+        });
+        await session.send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+          nativeVirtualKeyCode: 27,
+        });
+        open = await waitFor(
+          () => session.evaluate(`!document.querySelector(${JSON.stringify(selector)})`),
+          { waitMs: 2000, stepMs: 120 },
+        );
+        // Esc 不够（有的弹窗只认真实外部点击）时，降级成直接点遮罩
+        if (open !== true) {
+          await session.evaluate(`(() => {
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return false;
+            for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+              el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true }));
+            }
+            return true;
+          })()`);
+          await waitFor(
+            () => session.evaluate(`!document.querySelector(${JSON.stringify(selector)})`),
+            { waitMs: 2000, stepMs: 120 },
+          );
+        }
+      }
+      return BLOCKING_OVERLAYS.every((s) => s) &&
+        (await session.evaluate(
+          `(${JSON.stringify(BLOCKING_OVERLAYS)}).every((s) => !document.querySelector(s))`,
+        )) === true;
+    },
+
     /** 记录当前主题 id，供收尾还原时比对 */
     currentThemeId: () =>
       session.evaluate(
         `document.documentElement.dataset.workbuddySkin ?? null`,
       ),
   };
+
+  // 卫生动作：连接一建立就把残留的全屏遮罩清掉。
+  // 这样"跑整套"和"单跑一个测试"的前置状态一致 —— 测试不再依赖执行顺序。
+  if (session) {
+    try {
+      await h.clearBlockingOverlays();
+    } catch {
+      /* 清理失败不阻断测试，由测试自己的断言去暴露真实问题 */
+    }
+  }
 
   return h;
 }
