@@ -281,6 +281,62 @@ try {
   check("切到别的设置页后插件面板收起", restoreNative.open === false, JSON.stringify(restoreNative));
   check("插件面板已隐藏", restoreNative.paneVisible === "none", String(restoreNative.paneVisible));
   check("原生面板已恢复显示", restoreNative.nativeShown === true, String(restoreNative.nativeShown));
+
+  // ---- 11. 「原生」模式下打开插件面板（2026-09-19 回归）----
+  // 背景：面板强调色 syncPaneThemeVars() 的兜底链是
+  //   自定义主题 → 内置主题 → 全局默认色，
+  // 前两级都依赖 currentThemeId()，而**「原生」模式下它是 null**，
+  // 所以必然落到第三级。那一级当时直接引用了 Node 侧常量 DEFAULT_ACCENT ——
+  // 面板脚本是在 renderer 里 eval 的，读不到 Node 作用域 → 抛 ReferenceError。
+  // 异常从 openPluginPane() 里抛出、被 click 处理器吞掉，于是
+  // 「切到原生后点插件条目毫无反应」；而且面板节点已经 append 了、原生面板也没被隐藏，
+  // 界面处于半途状态（比完全不响应更难排查）。
+  // 这组断言同时钉住「不再抛异常」与「面板真的打开了」。
+  const themeBeforeNative = await t.currentThemeId();
+  const nativeMode = await evaluate(`(() => {
+    const sk = window.__workbuddySkin;
+    sk.clearTheme();                       // 等价于点「原生」
+    sk.settings.close();
+    const skinId = document.documentElement.dataset.workbuddySkin ?? null;
+    let err = null;
+    let opened = null;
+    try {
+      opened = sk.settings.open();
+    } catch (e) {
+      err = String(e && e.message);
+    }
+    const pane = sk.settings.pane();
+    const content = document.querySelector(".settings-modal__content");
+    const nativePanel = content?.querySelector(":scope > .settings-modal__panel");
+    return {
+      skinId,
+      err,
+      opened,
+      paneExists: Boolean(pane),
+      paneDisplay: pane ? getComputedStyle(pane).display : null,
+      accent: pane ? getComputedStyle(pane).getPropertyValue("--wb-pane-accent").trim() : null,
+      expectedAccent: sk.settings.defaultAccent,
+      nativePanelDisplay: nativePanel ? getComputedStyle(nativePanel).display : null,
+    };
+  })()`);
+  check("切「原生」后皮肤标记已清除（确认真的处于原生模式）", nativeMode.skinId === null, `skin=${nativeMode.skinId}`);
+  check("原生模式下打开插件面板不再抛异常", nativeMode.err === null, String(nativeMode.err));
+  check("原生模式下 openPluginPane 返回 true", nativeMode.opened === true, String(nativeMode.opened));
+  check("原生模式下插件面板真的显示出来（不是卡在 display:none）", nativeMode.paneDisplay === "flex", String(nativeMode.paneDisplay));
+  check("原生模式下原生面板已被隐藏", nativeMode.nativePanelDisplay === "none", String(nativeMode.nativePanelDisplay));
+  check(
+    "原生模式下强调色兜底到了默认色（正是当初抛异常的那一行）",
+    typeof nativeMode.accent === "string" &&
+      nativeMode.accent.toLowerCase() === String(nativeMode.expectedAccent).toLowerCase(),
+    `--wb-pane-accent=${JSON.stringify(nativeMode.accent)} 期望 ${JSON.stringify(nativeMode.expectedAccent)}`,
+  );
+  // 还原：回到进入本节之前的主题，供后面的收尾逻辑继续用
+  await evaluate(`(() => {
+    const id = ${JSON.stringify(themeBeforeNative)};
+    if (id) window.__workbuddySkin.setTheme(id);
+    return true;
+  })()`);
+  await sleep(300);
 } finally {
   // ---- 收尾：删掉测试皮肤、还原图标开关与激活主题，并确保设置面板关掉 ----
   await evaluate(`(() => {

@@ -97,6 +97,44 @@ try {
   process.exit(1);
 }
 
+// ---------- 注入脚本的「作用域泄漏」体检（2026-09-19 真实踩坑） ----------
+// 症状：切到「原生」皮肤后，点设置面板里的插件条目**毫无反应**（不报错、不打开）。
+//
+// 根因：`DEFAULT_ACCENT` 是**模块作用域**常量（skin-menu.mjs 第 2 行），却被写进了
+// buildSkinMenuScript 返回的模板字符串里。模板是在 renderer 里 eval 的，
+// 读不到 Node 侧作用域 → 运行时抛 `ReferenceError: DEFAULT_ACCENT is not defined`。
+// 该行是 `?? DEFAULT_ACCENT` 的**最后一个兜底分支**，只有 currentThemeId() 为 null
+// （即「原生」模式）时才会被求值 —— 所以带皮肤时一切正常，切原生才炸。
+// 异常从 `openPluginPane()` 里抛出，被 click 处理器吞掉，表现就是"点了没反应"。
+//
+// ⚠️ 为什么语法检查抓不到：`new Function(code)` 只**解析**不执行，
+// 未定义引用是运行时错误，解析期完全看不出来。所以必须单独做一次名字扫描。
+{
+  const source = readFileSync(new URL("../src/skin-menu.mjs", import.meta.url), "utf8");
+  const entry = source.indexOf("export function buildSkinMenuScript");
+  // 只取「模板外」的模块作用域声明
+  const outsideNames = [
+    ...new Set(
+      [...source.slice(0, entry).matchAll(/^(?:export\s+)?(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/gm)].map(
+        (m) => m[1],
+      ),
+    ),
+  ];
+  const leaks = [];
+  for (const name of outsideNames) {
+    const re = new RegExp(`\\b${name.replace(/\$/g, "\\$")}\\b`, "g");
+    const hits = [...code.matchAll(re)];
+    if (hits.length) leaks.push(`${name} ×${hits.length}`);
+  }
+  if (leaks.length) {
+    console.error("注入脚本引用了 Node 端作用域的标识符（renderer 里不存在，运行时才会炸）：");
+    for (const leak of leaks) console.error(`  - ${leak}`);
+    console.error("修法：把它加进 buildSkinMenuScript 的 payload（如 defaultAccent），");
+    console.error("      脚本里改用 data.xxx 读取。");
+    process.exit(1);
+  }
+}
+
 // 皮肤 CSS 产物校验（正文来自 src/css/skin.css，经占位符填充）
 const css = buildSkinCss({
   theme: {

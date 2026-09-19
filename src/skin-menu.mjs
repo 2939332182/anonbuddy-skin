@@ -49,6 +49,10 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     settingsNavGroup: "\\u529f\\u80fd",
     settingsNavSelector: ".settings-navigation__group",
     settingsOverlaySelector: ".settings-modal-overlay",
+    // ⚠️ 必须走 payload 传进去：DEFAULT_ACCENT 是**模块作用域**常量（本文件第 2 行），
+    // 而下面返回的整段脚本是模板字符串，在 renderer 里 eval，读不到 Node 侧作用域。
+    // 直接写 DEFAULT_ACCENT 会抛 ReferenceError（2026-09-19 踩过，见文件末尾 lint 守卫）。
+    defaultAccent: DEFAULT_ACCENT,
   });
 
   return `(() => {
@@ -1339,10 +1343,13 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (!settingsPane) return;
     const surface = paneSurface();
     const dark = !isLightSurface(surface);
-    // 强调色可以沿用当前皮肤，它只是点缀，深浅背景下都够醒目
+    // 强调色可以沿用当前皮肤，它只是点缀，深浅背景下都够醒目。
+    // 三个兜底依次是：自定义主题 → 内置主题 → 全局默认色。
+    // ⚠️ 最后一个兜底正是「原生模式」会走到的分支（currentThemeId() 为 null 时前两个都落空），
+    // 所以它必须是 payload 里的值，不能直接引用 Node 侧常量（会抛 ReferenceError）。
     const id = currentThemeId();
     const custom = customThemes.find((c) => c.id === id);
-    const accent = custom?.colors.accent ?? data.themes.find((t) => t.id === id)?.accent ?? DEFAULT_ACCENT;
+    const accent = custom?.colors.accent ?? data.themes.find((t) => t.id === id)?.accent ?? data.defaultAccent;
     settingsPane.style.setProperty("--wb-pane-accent", accent);
     settingsPane.style.setProperty("--wb-pane-text", dark ? "#f0f2f6" : "#1a1a1a");
     settingsPane.style.setProperty("--wb-pane-card", dark ? "rgba(255,255,255,.06)" : "#ffffff");
@@ -1546,6 +1553,8 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       paneId: pluginPaneId,
       overlaySelector: data.settingsOverlaySelector,
       navGroup: data.settingsNavGroup,
+      // 面板强调色的兜底值（没有皮肤时用），供测试断言"原生模式真的走到了这一级兜底"
+      defaultAccent: data.defaultAccent,
       // 把条目补进导航栏（幂等）；面板没开时返回 false
       ensure: ensureSettingsEntry,
       // 打开我们的面板（等价于点那个导航条目）
