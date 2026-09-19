@@ -309,15 +309,20 @@ npm run test:list     # 列出套件与用例（含每个用例"为什么存在"
 e2e 依赖**真实运行中的 WorkBuddy**（它通过 CDP 连过去断言真实渲染结果）。
 没在跑时该套件会整段跳过而不是报失败。端口用 `WORKBUDDY_SKIN_PORT` 覆盖。
 
-> 交接给下一个 AI 助手继续开发？用 [`docs/HANDOFF-PROMPT.md`](docs/HANDOFF-PROMPT.md) 里的模板。
+> 交接给下一个 AI 助手继续开发？
+> - 先看 [`docs/HANDOFF.md`](docs/HANDOFF.md) —— **已完成工作总览 + 待办 + GitHub 发布规划**
+> - 再按 [`docs/HANDOFF-PROMPT.md`](docs/HANDOFF-PROMPT.md) 的模板把任务交给新窗口
 
 ## 内置主题
 
-| 主题 id | 名称 | 风格 |
-|---|---|---|
-| `miku-488137` | Miku 488137 | 青绿 · 高精度 |
-| `genshin-dawn` | 原神 · 晨曦 | 蓝 · 浅色 |
-| `wuthering-echo` | 鸣潮 · 共鸣 | 青 · 浅色 |
+| 主题 id | 名称 | 风格 | 深浅 |
+|---|---|---|---|
+| `miku-488137` | Miku 488137 | 青绿 · 高精度 | 浅色 |
+| `genshin-dawn` | 原神 · 晨曦 | 蓝 | 浅色 |
+| `wuthering-echo` | 鸣潮 · 共鸣 | 青紫 | **深色** |
+
+> 深浅由 `theme.json` 的 `colors.surface` 自动判定，并会**联动 WorkBuddy 自带的外观（浅色/深色）**：
+> 切浅色系主题 → 外观变浅色，切深色系 → 外观变深色；浅色系主题生效期间禁止切深色。
 
 暂时用不到的主题没有删掉，只是移到了 `themes-removed/`（`miku-light`、`genshin-night`、
 `wuthering-tide`、恋与深空 ×2、火影忍者 ×2）。把目录移回 `themes/` 再 apply 一次，
