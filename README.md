@@ -8,6 +8,8 @@
 
 <sub>换一张壁纸，换一种心情</sub>
 
+<sub>WorkBuddy 换肤 / 主题切换 / Wallpaper Engine 壁纸 / 本机 CDP 注入 / 不改一行官方文件</sub>
+
 <br>
 
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-e09c84?style=flat-square" alt="Platform">
