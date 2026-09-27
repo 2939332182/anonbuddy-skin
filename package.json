@@ -15,6 +15,9 @@
   "engines": {
     "node": ">=20"
   },
+  "os": [
+    "win32"
+  ],
   "bin": {
     "anonbuddy-skin": "src/cli.mjs"
   },

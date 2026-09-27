@@ -61,11 +61,10 @@ EDITIONS = {
 
 # scripts/ ships only the runtime pieces. The repo tree also holds tests, probes
 # and archive/, none of which belong in a runtime package.
+# Windows-only: the macOS .command launchers were retired, see README.
 SCRIPTS = [
     "apply.ps1",
-    "apply.command",
     "pause.ps1",
-    "pause.command",
     "workbuddy-path.ps1",
     "find-workbuddy.ps1",
     "launch-and-skin.ps1",   # start with CDP + inject, in one step
@@ -140,7 +139,7 @@ README_TXT = """========================================
 这个包是给「{label}」用的
 --------------------------------------
 
-WorkBuddy 有两条件产品线，装出来的东西不一样：
+WorkBuddy 有两条产品线，装出来的东西不一样：
 
   国际版（workbuddy.ai）    主程序 WorkBuddyAI.exe  数据目录 .workbuddy-ai
   国内版（workbuddy.cn）    主程序 WorkBuddy.exe    数据目录 .workbuddy
@@ -154,8 +153,7 @@ WorkBuddy 有两条件产品线，装出来的东西不一样：
 怎么用
 ------
 
-Windows：双击  一键换肤.bat
-macOS  ：双击  一键换肤.command
+双击  一键换肤.bat
 
 就这样。第一次跑会重启一次 WorkBuddy，
 重启完之后去右上角找那颗浮动按钮，
@@ -164,7 +162,7 @@ macOS  ：双击  一键换肤.command
 不想要了
 --------
 
-Windows：双击  一键还原.bat
+双击  一键还原.bat
 
 官方文件从头到尾没被改过，
 卸载工具直接删掉这个文件夹就行。
@@ -260,10 +258,6 @@ def build(edition, version, keep_stage):
         fh.write(RESTORE_BAT)
     with open(os.path.join(stage, "使用说明.txt"), "w", encoding="utf-8", newline="\r\n") as fh:
         fh.write(README_TXT.format(**fmt))
-    # macOS launcher is shared; keep shipping the repo copy
-    shutil.copy2(os.path.join(REPO, "scripts", "apply.command"),
-                 os.path.join(stage, "一键换肤.command"))
-
     files = sorted(
         os.path.join(dirpath, name)
         for dirpath, _, filenames in os.walk(stage)
@@ -274,7 +268,15 @@ def build(edition, version, keep_stage):
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for full in files:
             rel = os.path.relpath(full, stage).replace(os.sep, "/")
-            archive.write(full, posixpath.join(root, rel))
+            arc = posixpath.join(root, rel)
+            # Stamp a stable Unix mode instead of relying on archive.write():
+            # Windows filesystems carry no mode for zipfile to copy, so it falls
+            # back to 0o666. Everything shipped now is a regular file.
+            info = zipfile.ZipInfo.from_file(full, arc, strict_timestamps=False)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            with open(full, "rb") as src, archive.open(info, "w") as dst:
+                shutil.copyfileobj(src, dst)
 
     size = os.path.getsize(out) / 1048576
     print(f"built {out}")
