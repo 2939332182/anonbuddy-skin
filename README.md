@@ -83,7 +83,7 @@ WorkBuddy 是 Electron 写的，渲染进程跑在 `file://` 页面上，那只�
 
 ### 下载即用版（不想碰命令行就用这个）
 
-去 [Releases](../../releases) 下载 `chihayaanon插件1.0.0.zip`，解压到哪儿都行，然后双击：
+去 [Releases](https://github.com/2939332182/anonbuddy-skin/releases/latest) 下载 `chihayaanon-skin-1.0.0.zip`，解压到哪儿都行，然后双击：
 
 - Windows：`一键换肤.bat`
 - macOS：`一键换肤.command`
