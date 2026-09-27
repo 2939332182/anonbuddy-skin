@@ -671,19 +671,38 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 5.6.x 的设置是独立窗口：在那边点主题只改它自己的 DOM，主窗口不会跟着变
   // （实测：在设置窗口调 setTheme 后，主窗口的 dataset.anonbuddySkin 纹丝不动，
   //  但 localStorage 已经写进去了）。两个窗口共享同一个 file:// origin 的
-  // localStorage，所以用 storage 事件把主题同步过去。
+  // localStorage，所以用 storage 事件把状态同步过去。
   // 该事件只在"别的窗口"写入时触发，本窗口自己写不会触发，天然不会形成回环；
   // 再加一道值比较，避免重复应用。
+  //
+  // ⚠️ 要同步的不止主题：Wallpaper Engine 壁纸走的是另外两个键
+  //    （WE_THEME_KEY / WE_PAUSED_KEY）。只盯 LAST_KEY 的话，
+  //    在设置窗口里点「应用」换壁纸，主窗口不会有任何反应。
   window.addEventListener("storage", (event) => {
-    if (!event || event.key !== LAST_KEY) return;
-    const current = document.documentElement.dataset.anonbuddySkin ?? null;
-    const next = event.newValue;
-    if (!next || next === NATIVE_MARK) {
-      if (current) clearTheme();
+    if (!event) return;
+
+    if (event.key === LAST_KEY) {
+      const current = document.documentElement.dataset.anonbuddySkin ?? null;
+      const next = event.newValue;
+      if (!next || next === NATIVE_MARK) {
+        if (current) clearTheme();
+        return;
+      }
+      if (next === current) return;
+      if (canApplyTheme(next)) setTheme(next);
       return;
     }
-    if (next === current) return;
-    if (canApplyTheme(next)) setTheme(next);
+
+    if (event.key === WE_THEME_KEY) {
+      syncWeFromStorage();
+      return;
+    }
+
+    if (event.key === WE_PAUSED_KEY) {
+      wePaused = readWePaused();
+      syncBgVideoPlayback();
+      syncWeUi();
+    }
   });
 
   for (const theme of data.themes) {
@@ -917,11 +936,20 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     syncWeUi();
   };
 
-  const setWeVolume = (value) => {
+  // 音量与播放状态是联动的：
+  //   拖音量（>0）= 用户想听声音 → 自动解除静音，并让暂停中的壁纸恢复播放；
+  //   暂停播放   = setWePaused 会把音量归零（见下），所以两个动作不会打架。
+  // options.fromPause 区分"因暂停而被动归零"这一路，避免它反过来把自己唤醒。
+  const setWeVolume = (value, options = {}) => {
     const next = Math.round(Number(value));
     weVolume = Number.isFinite(next) ? Math.min(100, Math.max(0, next)) : weVolume;
     try { localStorage.setItem(WE_VOLUME_KEY, String(weVolume)); } catch (error) {}
+    if (!options.fromPause && weVolume > 0) {
+      if (!weSound) { weSound = true; writeFlag(WE_SOUND_KEY, weSound); }
+      if (wePaused) { wePaused = false; writeWePaused(false); }
+    }
     applyVolume();
+    syncBgVideoPlayback();
     syncWeUi();
   };
 
@@ -979,9 +1007,26 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     syncBgVideoPlayback();
   };
 
+  // 从 localStorage 读出当前该用哪个 WE 壁纸并真正换过去。
+  // 供 storage 事件使用：在设置窗口里点「应用」只写了 WE_THEME_KEY，
+  // 另一个窗口要靠这个函数把壁纸切过去。
+  // （applyWeTheme 定义在本函数之后，但只会在事件触发时被调用，那时已就绪。）
+  const syncWeFromStorage = () => {
+    const id = readWeTheme();
+    if (!id) { onLeaveWeTheme(); return; }
+    // 注意比较的是 item.id，不是 weThemeId(item)：
+    // writeWeTheme 存的是 item.id（如 "3668718297"），而 weThemeId 会加 we- 前缀
+    // 变成 dataset 用的 "we-3668718297"。拿带前缀的值去比就永远匹配不上。
+    const item = (data.weItems || []).find((candidate) => candidate.id === id);
+    if (item) applyWeTheme(item);
+  };
+
   const setWePaused = (paused) => {
     wePaused = Boolean(paused);
     writeWePaused(wePaused);
+    // 暂停就把音量归零：既避免"暂停了还在出声"，也让"拖音量"成为恢复播放的
+    // 唯一入口（音量不为 0 就自动播放，见 setWeVolume）。
+    if (wePaused && weVolume !== 0) setWeVolume(0, { fromPause: true });
     syncBgVideoPlayback();
     syncWeButtons();
   };
