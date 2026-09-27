@@ -51,9 +51,19 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     customListKey: "workbuddyCustomThemes",
     // 设置面板集成：往「功能」分组插一个入口，右侧内容区渲染我们的面板
     pluginName: "ChihayaAnon 插件",
-    settingsNavGroup: "\\u529f\\u80fd",
+    // 分组名直写中文即可：这个对象字面量在 Node 侧构造、再作为 payload 传进 renderer，
+    // 并不在模板字符串里，所以不需要（也不能）写成双反斜杠的 \uXXXX ——
+    // 写成 "\\u529f\\u80fd" 会被解析成 12 个字符的字面量，和分组标题 "功能" 永不相等，
+    // 于是主匹配失效、只能落到兜底分组上（旧版恰好 groups[1] 就是「功能」，所以没暴露）。
+    settingsNavGroup: "功能",
     settingsNavSelector: ".settings-navigation__group",
-    settingsOverlaySelector: ".settings-modal-overlay",
+    // 设置弹窗的根容器。5.6.x 把设置从「主窗口内弹层」改成了「独立窗口」：
+    // 外层类名随之由 .settings-modal-overlay 变成 .settings-modal--window，
+    // 内层（.settings-navigation / .settings-modal__content / __panel）两版完全一致。
+    // 所以这里不写死单一类名，改为按候选逐个试。
+    // settingsOverlaySelector 保留下来给测试与外部脚本用，取值是两版都存在的内层容器。
+    settingsRootSelectors: [".settings-modal-overlay", ".settings-modal--window", ".settings-modal"],
+    settingsOverlaySelector: ".settings-modal",
     // ⚠️ 必须走 payload 传进去：DEFAULT_ACCENT 是**模块作用域**常量（本文件第 2 行），
     // 而下面返回的整段脚本是模板字符串，在 renderer 里 eval，读不到 Node 侧作用域。
     // 直接写 DEFAULT_ACCENT 会抛 ReferenceError（2026-09-19 踩过，见文件末尾 lint 守卫）。
@@ -1447,13 +1457,31 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 为什么不用伪元素：拖"背景图模糊"滑块时要实时改模糊量，而实测在 html 上
   // style.setProperty 写自定义属性会触发全文档样式重算（23ms/次），拖动只有 ~40fps；
   // 直接写这个节点的 style.filter / style.inset 则是 0ms。见 skin.css 里的同段说明。
+  //
+  // ⚠️ 子窗口不铺这一层。
+  // 5.6.x 的设置是独立窗口（URL 带 windowKind=settings），它的窗口顶部有一段原生
+  // 「安全区」—— 面板从 y=62 才开始，那 62px 留给标题栏按钮。壁纸层按 inset:0 铺满
+  // 整窗时会把这 62px 也一起铺上，于是在设置面板上方露出一条壁纸条。
+  // 主窗口没有这个安全区（面板贴着窗口边），所以国际版的设置弹层不会出现该现象。
+  // 设置这类工具窗口本来也不需要底图，配色覆盖（skin.css 的 --cb-* 变量）照常生效。
+  // 判断依据用 URL 里的 windowKind / windowAppId，两者都是稳定的原生查询参数。
+  const isChildWindow = /[?&](?:windowKind|windowAppId)=/.test(location.search);
+  // 子窗口的 body 上没有 data-application-name，而 skin.css 的配色规则全部以
+  // body[data-application-name=workbuddy] 开头 —— 不补这一下，设置窗口会停在原生灰白，
+  // 深色主题下就成了"深色主窗口 + 纯白设置面板"。
+  // 这里刻意加插件自己的属性而不是伪造原生那个，免得干扰 WorkBuddy 自己的逻辑。
+  if (isChildWindow && document.body) {
+    document.body.setAttribute("data-wb-child-window", "1");
+  }
   // 先按 id 清掉可能残留的孤儿节点（旧实例异常中断时留下的），与 root 的写法一致。
   document.getElementById(BG_LAYER_ID)?.remove();
-  bgLayer = document.createElement("div");
-  bgLayer.id = BG_LAYER_ID;
-  // 图层的内容（底色/遮罩/hero）全部由 skin.css 的 #anonbuddy-skin-bg 规则给，
-  // 这里只负责 append + 后面用内联样式驱动模糊。
-  document.body.appendChild(bgLayer);
+  bgLayer = isChildWindow ? null : document.createElement("div");
+  if (bgLayer) {
+    bgLayer.id = BG_LAYER_ID;
+    // 图层的内容（底色/遮罩/hero）全部由 skin.css 的 #anonbuddy-skin-bg 规则给，
+    // 这里只负责 append + 后面用内联样式驱动模糊。
+    document.body.appendChild(bgLayer);
+  }
 
   // 启动时应用哪个主题：
   //   restoreLast（apply --theme last）→ 用用户上次在菜单里选的那个，自定义主题也能恢复；
@@ -1512,9 +1540,21 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 所以这里直接读内容区的实际计算背景色来判断深浅。
   // 注意：这段代码整体在模板字符串里，正则里的反斜杠会被模板字面量吃掉一层，
   // 所以字面量要写成双反斜杠（同文件 file.name.replace 那处的做法）。
+  // 设置弹窗根容器解析：按候选列表逐个试，不依赖单一类名，也不依赖任何顺序。
+  // 旧版（5.5.x）：设置是主窗口内的弹层，根是 .settings-modal-overlay。
+  // 新版（5.6.x）：设置跑在独立 renderer 窗口里，没有 overlay 包装，根是 .settings-modal--window。
+  // 两者内层结构一致，所以只需要在这里吸掉差异。
+  const resolveSettingsRoot = () => {
+    for (const selector of data.settingsRootSelectors) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    return null;
+  };
+
   const paneSurface = () => {
-    const content = document.querySelector(data.settingsOverlaySelector + " .settings-modal__content")
-      ?? document.querySelector(data.settingsOverlaySelector + " .settings-modal");
+    const root = resolveSettingsRoot();
+    const content = root?.querySelector(".settings-modal__content") ?? root;
     const bg = content ? getComputedStyle(content).backgroundColor : "";
     const m = /rgba?\\(([0-9]+), ([0-9]+), ([0-9]+)/.exec(bg || "");
     if (m) return "#" + [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, "0")).join("");
@@ -2227,7 +2267,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 并且不覆盖原生已有的底色（原生有就不动，避免画蛇添足）。
   const SOLID_ONLY_WHEN_TRANSPARENT = true;
   const ensureModalSurface = () => {
-    const modal = document.querySelector(data.settingsOverlaySelector);
+    const modal = resolveSettingsRoot();
     const content = modal?.querySelector(".settings-modal__content");
     if (!content) return false;
     const alphaOf = (value) => {
@@ -2267,7 +2307,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     // 如果我们之前给弹窗铺过实底，必须先撤掉再重算：
     // 否则 ensureModalSurface 读到的"不透明底色"其实是我们自己写的，会被误判成
     // "原生自己有实底"从而把覆盖撤掉，来回抖动。
-    const modal = document.querySelector(data.settingsOverlaySelector);
+    const modal = resolveSettingsRoot();
     const content = modal?.querySelector(".settings-modal__content");
     if (content?.dataset.wbPaneSurface === "1") {
       content.style.removeProperty("background-color");
@@ -2279,7 +2319,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   // 点我们的导航条目：显示自己的面板、藏掉原生面板
   const openPluginPane = () => {
-    const modal = document.querySelector(data.settingsOverlaySelector);
+    const modal = resolveSettingsRoot();
     if (!modal) return false;
     const content = modal.querySelector(".settings-modal__content");
     if (!content) return false;
@@ -2306,7 +2346,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (!pluginEntryActive) return;
     pluginEntryActive = false;
     if (settingsPane) settingsPane.style.display = "none";
-    const modal = document.querySelector(data.settingsOverlaySelector);
+    const modal = resolveSettingsRoot();
     const content = modal?.querySelector(".settings-modal__content");
     content?.querySelectorAll(":scope > .settings-modal__header, :scope > .settings-modal__panel").forEach((el) => {
       el.style.display = "";
@@ -2316,7 +2356,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 把我们的条目补进「功能」分组（幂等）
   const ensureSettingsEntry = () => {
     if (stopped) return;
-    const overlay = document.querySelector(data.settingsOverlaySelector);
+    const overlay = resolveSettingsRoot();
     if (!overlay) {
       // 面板关掉了：清掉引用，下次打开重建
       if (settingsPane) { settingsPane.remove(); settingsPane = null; }
@@ -2349,9 +2389,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     }
 
     const groups = [...nav.querySelectorAll(data.settingsNavSelector)];
+    // 定位「功能」分组：主匹配按分组标题文本走，不依赖分组数量与顺序。
+    // 兜底也不按索引（原来的 groups[1] ?? groups[0] 会在分组增删时插错位置）：
+    // 先挑第一个「里面已经有可点条目」的分组，再退到导航容器本身，
+    // 这样 WorkBuddy 无论改名、合并还是新增分组，入口都仍然插得进去。
     const featureGroup = groups.find((g) =>
       (g.querySelector(".settings-navigation__group-title")?.textContent || "").trim() === data.settingsNavGroup)
-      ?? groups[1] ?? groups[0];
+      ?? groups.find((g) => g.querySelector(".settings-navigation__item"))
+      ?? nav;
     if (!featureGroup) return;
 
     const entry = document.createElement("button");

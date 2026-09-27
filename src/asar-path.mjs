@@ -80,6 +80,57 @@ export function findAsar() {
   return null;
 }
 
+/** 从注册表卸载项解析安装位置（仅 Windows）。
+ *  取值顺序与 scripts/workbuddy-path.ps1 对齐：DisplayIcon 最准，其次是 InstallLocation。
+ *  换台机器 / 换盘重装后环境变量与硬编码候选都会失效，只有这里跟得住真实安装位置。 */
+export function exeFromRegistry() {
+  if (process.platform !== "win32") return null;
+  const script = [
+    "$keys = @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',",
+    "  'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',",
+    "  'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall')",
+    "Get-ChildItem $keys -ErrorAction SilentlyContinue | ForEach-Object {",
+    "  $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue",
+    "  if ($p -and $p.DisplayName -like '*WorkBuddy*') {",
+    "    foreach ($v in @($p.DisplayIcon, $p.InstallLocation, $p.UninstallString)) {",
+    "      if ($v) { ($v.Trim('\"') -split ',')[0] }",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+  let raw;
+  try {
+    raw = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { encoding: "utf8", timeout: 12000, windowsHide: true },
+    );
+  } catch {
+    return null; // 注册表查不到就交给后面的进程反推
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const value = line.trim().replace(/^"|"$/g, "");
+    if (!value) continue;
+    if (/\.exe$/i.test(value)) {
+      try {
+        if (existsSync(value)) return value;
+      } catch {
+        /* skip */
+      }
+      continue;
+    }
+    for (const name of EXE_NAMES) {
+      const candidate = join(value, name);
+      try {
+        if (existsSync(candidate)) return candidate;
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return null;
+}
+
 /** 找 WorkBuddy 可执行文件（用于反推安装目录） */
 export function findExe() {
   const out = [];
@@ -98,6 +149,10 @@ export function findExe() {
       /* skip */
     }
   }
+  // 注册表兜底（仅 Windows）：换盘重装后 WORKBUDDY_EXE 与上面的硬编码候选都会失效，
+  // 只有卸载项跟着真实安装位置走，所以这条比环境变量可靠。
+  const fromRegistry = exeFromRegistry();
+  if (fromRegistry) return fromRegistry;
   // 从正在运行的进程反推（仅 Windows，失败就算了）
   if (process.platform === "win32") {
     try {

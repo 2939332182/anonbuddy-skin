@@ -61,13 +61,20 @@ function Get-WorkBuddyCandidates {
         foreach ($key in @('InstallLocation', 'DisplayIcon', 'UninstallString')) {
           $val = $it.$key
           if (-not $val) { continue }
-          $val = $val.Trim('"')
-          if ($val -match '\.exe') {
-            $p = ($val -split ',')[0].Trim('"')
-            Add-Cand $p
-          } elseif ($val) {
-            foreach ($n in $names) { Add-Cand (Join-Path $val $n) }
-          }
+          # The three values have different shapes:
+          #   InstallLocation = 'D:\Apps\WorkBuddyAI'                              (a folder)
+          #   DisplayIcon     = 'D:\Apps\WorkBuddyAI\WorkBuddyAI.exe,0'             (exe + icon index)
+          #   UninstallString = '"D:\Apps\WorkBuddyAI\Uninstall X.exe" /currentuser' (exe + arguments)
+          # Strip the wrapping quotes and any trailing arguments first, then the icon index.
+          if ($val -match '^\s*"([^"]+)"') { $val = $matches[1] }
+          $val = (($val -split ',')[0]).Trim().Trim('"')
+          if (-not $val) { continue }
+          # Only ever use the containing folder. UninstallString points at the UNINSTALLER,
+          # so treating it as the app itself would make the launcher run the uninstaller.
+          $dir = $val
+          if ($val -match '\.exe$') { $dir = Split-Path -Parent $val }
+          if (-not $dir) { continue }
+          foreach ($n in $names) { Add-Cand (Join-Path $dir $n) }
         }
       }
     } catch { }

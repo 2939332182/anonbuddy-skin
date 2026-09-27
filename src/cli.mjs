@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { exeFromRegistry } from "./asar-path.mjs";
 import { DEFAULT_CDP_PORT, DEFAULT_THEME_ID, EXPECTED_BUNDLE_ID, RENDERER_URL_HINT, resolveStudioPaths } from "./constants.mjs";
 import { applySkin, removeSkin, skinStatus } from "./injector.mjs";
 import { loadTheme } from "./theme-schema.mjs";
@@ -176,8 +177,12 @@ export async function runCli(argv, overrides = {}) {
   if (command === "doctor") {
     const exists = async (path) => access(path).then(() => true, () => false);
     if (process.platform === "win32") {
+      // 注册表项排在环境变量之后：WORKBUDDY_EXE 会指向已卸载的旧盘（换盘重装后极易过期），
+      // 而卸载项跟着真实安装位置走。它既是候选，也是"环境变量是否过期"的判据。
+      const registryExe = exeFromRegistry();
       const candidates = [
         process.env.WORKBUDDY_EXE,
+        registryExe,
         process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "workbuddy", "WorkBuddy.exe"),
         process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs", "workbuddy", "WorkBuddy.exe"),
         process.env.ProgramFiles && join(process.env.ProgramFiles, "WorkBuddy", "WorkBuddy.exe"),
@@ -191,6 +196,13 @@ export async function runCli(argv, overrides = {}) {
         platform: "win32",
         app,
         appFound: !!app,
+        source: !app
+          ? null
+          : app === process.env.WORKBUDDY_EXE
+            ? "env:WORKBUDDY_EXE"
+            : app === registryExe
+              ? "registry:uninstall"
+              : "common-install-path",
         candidates,
         cdpPort: DEFAULT_CDP_PORT,
         rendererHint: RENDERER_URL_HINT,

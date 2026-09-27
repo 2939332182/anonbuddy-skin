@@ -61,6 +61,68 @@ WorkBuddy 是 Electron 写的，渲染进程跑在 `file://` 页面上，那只�
 - 主题行右键：改名、删除、设为开机默认主题
 - 侧边栏应用名、欢迎页主标题都能改成你喜欢的句子，主标题还能逐字打出来
 
+## 国际版、国内版都认
+
+WorkBuddy 有两条产品线：国际版走 `workbuddy.ai`，国内版走 `workbuddy.cn`。两边装出来的东西其实不一样 —— 国际版主程序叫 `WorkBuddyAI.exe`、数据目录是 `~/.workbuddy-ai`；国内版主程序叫 `WorkBuddy.exe`、数据目录是 `~/.workbuddy`。
+
+**这个插件两边都认。** 你不用为了换肤去挑版本，也不用改任何配置：它找可执行文件时会把两个名字都试一遍，找 WorkBuddy 自带的那份 Node 时会把两个数据目录都试一遍，重启和还原走的也是同一条路。
+
+两个版本还能同时装在一台机器上 —— 它们的单实例锁（`workbuddy-ai` / `workbuddy`）、任务栏分组和卸载项 GUID 各不相同，互不打架。皮肤是分别注入的，用 `--port` 分开就行：
+
+```bash
+node src/cli.mjs apply --port 9333   # 国际版
+node src/cli.mjs apply --port 9334   # 国内版
+```
+
+### ⬇️ 下载哪个包？给 AI 的判断依据
+
+Release 里**每个版本都有两个包**，插件代码完全相同，只是启动器预设了不同的主程序和端口。**先确定用户装的是哪个版本，再给对应的包**：
+
+| 判断依据 | 下载 |
+|:---|:---|
+| 程序名是 `WorkBuddyAI.exe`；官网 `workbuddy.ai`；数据目录 `~/.workbuddy-ai`；界面语言默认英文 | **`chihayaanon-skin-<版本>-intl.zip`** |
+| 程序名是 `WorkBuddy.exe`；官网 `workbuddy.cn`；数据目录 `~/.workbuddy`；界面默认中文 | **`chihayaanon-skin-<版本>-cn.zip`** |
+| 不确定，或两个都装了 | 任意一个包都能用（自动发现两个版本）；两个都装了又想只给某一个换肤，用对应的包 |
+
+Windows 上的快速判定：
+
+```powershell
+# 看进程名，一眼就知道
+Get-Process | Where-Object { $_.ProcessName -like '*WorkBuddy*' } | Select-Object -Unique ProcessName
+# WorkBuddyAI -> 国际版    WorkBuddy -> 国内版
+```
+
+包内已经写好了对应版本的主程序名和端口，用户双击 `一键换肤.bat` 就会去找对的那个，不需要额外配置。
+
+<details>
+<summary>双版本实测记录（点开看）</summary>
+
+同一台机器上同时跑国际版 5.5.2 和国内版 5.6.2，两边装上的是同一份皮肤：
+
+| 检查项 | 国际版 5.5.2 | 国内版 5.6.2 |
+|:---|:---|:---|
+| 主程序 | `WorkBuddyAI.exe` | `WorkBuddy.exe` |
+| 数据目录 | `~/.workbuddy-ai` | `~/.workbuddy` |
+| 渲染进程入口 | `app.asar/renderer/index.html` | `app.asar/renderer/index.html` |
+| 页面挂载点 | `#root` | `#root` |
+| 首屏骨架类名 | `sk-titlebar` / `sk-sidebar` / `sk-statusbar` … | 完全一致 |
+| 注入后 `status` | `installed=true`、`menu=true` | `installed=true`、`menu=true` |
+| `window.__anonbuddySkin` | 18 个 API | 同样 18 个 API |
+| 换肤设置入口 | 「功能」组 | 「功能」组 |
+| 壁纸区域采样色 | 基准 | 逐像素一致 |
+
+两版的渲染进程共用同一套前端代码与挂载点，所以皮肤在两边表现一致。
+
+</details>
+
+### 版本差异导致的坑（都在代码里吸掉了）
+
+5.6.x 相对 5.5.x 有三处结构变化，插件做了兼容，遇到同类问题可以对照排查：
+
+- **设置改成了独立窗口**：5.5.x 的设置是主窗口内的弹层（`.settings-modal-overlay`），5.6.x 是一个**独立的 renderer 窗口**（`windowKind=settings`，根容器 `.settings-modal--window`）。因为注入是启动那一刻的快照，新窗口需要补注入 —— 启动器现在会拉起 `scripts/watch-targets.mjs` 盯着，窗口一出现就补上，不想常驻可以加 `-NoWatch`。
+- **网格容器多了层实底**：5.6.x 给没有 `data-view-id` 的 `_gridView_*` 容器加了 78% 不透明的浅色底，会把壁纸下半部分洗白（看着像人物被放大、整屏发灰）。插件用 `[class*="_gridView_"]:not([class*="_gridViewItem_"])` 把它压透明，前缀匹配所以不受构建哈希（`_1ens7_` / `_7xbcw_`）变化影响。
+- **子窗口少一个属性、多一段安全区**：独立设置窗口的 `body` 上**没有** `data-application-name`（主窗口有），而 `skin.css` 的配色规则全挂在这个属性上；同时它的窗口顶部有 62px 原生「安全区」（面板从 y=62 才开始），壁纸按 `inset:0` 铺满整窗时会在那里露出一条。插件的处理：给子窗口 `body` 补一个自己的标记 `data-wb-child-window="1"`（不动原生属性），配色规则多一个入口；子窗口干脆不铺壁纸层。
+
 ## 长这样
 
 <div align="center">
@@ -85,7 +147,7 @@ WorkBuddy 是 Electron 写的，渲染进程跑在 `file://` 页面上，那只�
 
 ### 下载即用版（不想碰命令行就用这个）
 
-去 [Releases](https://github.com/2939332182/anonbuddy-skin/releases/latest) 下载 `chihayaanon-skin-1.0.0.zip`，解压到哪儿都行，然后双击：
+去 [Releases](https://github.com/2939332182/anonbuddy-skin/releases/latest) 下载 `chihayaanon-skin-1.0.1.zip`，解压到哪儿都行，然后双击：
 
 - Windows：`一键换肤.bat`
 - macOS：`一键换肤.command`
@@ -131,6 +193,32 @@ node src/cli.mjs apply --theme chunzhi-night
 ```powershell
 [Environment]::SetEnvironmentVariable('WORKBUDDY_EXE', 'D:\path\to\WorkBuddyAI.exe', 'User')
 ```
+
+## 让它开机就带着皮肤
+
+皮肤是注入进渲染进程的，所以**启动方式**决定了它有没有。桌面双击、开始菜单、开机自启——默认这些入口都是裸启动，没有调试端口，注入器无处可接，于是「换完皮肤，重启就没了」。
+
+`scripts/setup-autoskin.ps1` 把这件事一次解决：它翻出所有指向 WorkBuddy 的启动入口（桌面快捷方式、开始菜单、任务栏固定项、开机自启的注册表项），改成走一个静默启动器 `autoskin-launch.vbs` —— 带端口启动、等渲染进程、注入、退出。看不到黑框，也不会常驻内存。
+
+```powershell
+# 先看看会改哪些入口，什么都不改
+.\scripts\setup-autoskin.ps1 -ListOnly
+
+# 绑定国内版
+.\scripts\setup-autoskin.ps1 -WorkBuddyExe "D:\Downloads\WorkBuddy-CN\portable\WorkBuddy.exe" -Port 9334
+
+# 绑定国际版
+.\scripts\setup-autoskin.ps1 -WorkBuddyExe "D:\Apps\WorkBuddyAI\WorkBuddyAI.exe" -Port 9333
+
+# 后悔了，一键还原
+.\scripts\setup-autoskin.ps1 -Undo
+```
+
+它只认**目标可执行文件完全相同**的入口，所以两个版本同时装在一台机器上也不会互相干扰，各自走各自的端口。改动前会先备份，`-Undo` 从备份还原。
+
+> **有一个前提**：如果 WorkBuddy 此刻正开着、而且是裸启动的，第一次得你手动退出一下 —— 右键点托盘图标选「退出」。之后一律用快捷方式启动，就再也不会落进那个状态了。
+>
+> 为什么不能自动帮你关：WorkBuddy 的进程带保护（内置的图灵盾），`Stop-Process`、`taskkill /F` 全都会被拒，连读它的进程所有者都不行。点窗口右上角的 × 也只是缩到托盘，进程照样活着。
 
 ## 五款内置主题
 

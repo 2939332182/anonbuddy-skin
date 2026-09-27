@@ -1,0 +1,76 @@
+========================================
+  AnonBuddy Skin    WorkBuddy 换肤
+========================================
+
+怎么用
+------
+
+Windows：双击  一键换肤.bat
+macOS  ：双击  一键换肤.command
+
+就这样。第一次跑会重启一次 WorkBuddy，
+重启完之后去右上角找那颗浮动按钮，
+点开就能换主题了。
+
+不想要了
+--------
+
+Windows：双击  一键还原.bat
+
+官方文件从头到尾没被改过，
+卸载工具直接删掉这个文件夹就行。
+
+
+国际版 / 国内版
+---------------
+
+WorkBuddy 有国际版和国内版两条产品线，装出来的东西
+不太一样：国际版主程序叫 WorkBuddyAI.exe，数据目录是
+.workbuddy-ai；国内版主程序叫 WorkBuddy.exe，数据目录
+是 .workbuddy。
+
+这个工具两边都认，你不用挑版本、也不用改配置，
+换肤和还原走的是同一条路。
+
+
+如果报错
+--------
+
+最常见的两种情况：
+
+1) 说找不到 Node.js
+
+   这个工具需要 Node 运行时。WorkBuddy 自带一份，国际版在
+     %USERPROFILE%\.workbuddy-ai\binaries\node\versions\
+   国内版在
+     %USERPROFILE%\.workbuddy\binaries\node\versions\
+   两个位置它都会找。如果都是空的，先把 WorkBuddy 正常
+   启动一次，它会把 Node 解压出来。然后再双击一次。
+
+2) 说找不到 WorkBuddy
+
+   它会自动认国际版（WorkBuddyAI.exe）和国内版
+   （WorkBuddy.exe）两种安装，还会读注册表里的安装位置。
+   如果还是没找到，跑一下：
+     scripts\find-workbuddy.ps1
+   它会列出所有试过的路径和命中的那一个，然后把安装路径
+   直接告诉 apply.ps1：
+     .\scripts\apply.ps1 -WorkBuddyExe "D:\你的路径\WorkBuddyAI.exe"
+
+
+里面都有什么
+------------
+
+  src\        插件本体（注入脚本，纯 JavaScript）
+  themes\     五款内置主题
+  tools\      解包工具 RePKG（MIT 许可）
+  scripts\    apply / pause / 查找脚本
+  README.md   完整说明（想深入了解看这个）
+
+
+版权
+----
+
+代码：MIT
+内置主题的背景图来自 Wallpaper Engine 创意工坊，
+版权归各自作者，仅作展示。

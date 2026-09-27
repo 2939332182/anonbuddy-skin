@@ -77,7 +77,14 @@ body {
   --wb-sidebar-blur-px: 24px;
 }
 
-body[data-application-name=workbuddy] {
+/* 主题色变量。两个入口：
+ *   body[data-application-name=workbuddy] —— 主窗口（原生自带这个属性）
+ *   body[data-wb-child-window="1"]        —— 子窗口，5.6.x 的设置是独立窗口，
+ *     它的 body 上没有 data-application-name，由注入脚本补这个标记。
+ *     少了它设置面板会停在原生灰白，深色主题下与主窗口割裂。
+ * 下面同族的 19 条规则都挂在 [data-view-id=sidebar] 下，设置窗口没有侧边栏，无需重复。 */
+body[data-application-name=workbuddy],
+body[data-wb-child-window="1"] {
   --wb-accent: {{accent}};
   --wb-secondary: {{secondary}};
   --wb-surface: {{surface}};
@@ -647,6 +654,21 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-
 [data-view-id=detail-panel] {
   background: color-mix(in srgb, var(--wb-glass) 70%, transparent) !important;
   backdrop-filter: blur(18px) saturate(1.08);
+}
+
+/* 网格容器（_gridView_*）：压掉 WorkBuddy 5.6.x 新加的实底。
+ *
+ * 实测：国际版 5.5.x 这个容器是透明的，壁纸能完整透出；国内版 5.6.x 给它加了
+ * background-color: color(srgb 0.9762 0.9220 0.9021 / 0.78) —— 78% 不透明的浅色实底，
+ * 铺在整个主内容区之上，把壁纸下半部分洗白（看起来像"人物被放大、整屏发灰"）。
+ *
+ * 它身上既没有 data-view-id，类名又带 CSS Modules 构建哈希（_gridView_1ens7_9 /
+ * _gridView_7xbcw_9），写死任何一个都会在下个版本失效 —— 所以用前缀匹配，
+ * 再用 :not() 排除 _gridViewItem_* 子项（侧边栏/详情面板的磨砂是设计需要的，
+ * 那部分由上面的 [data-view-id=...] 规则单独负责）。
+ * 只清 background-color，不动 background-image：子项上的渐变要保留。 */
+[class*="_gridView_"]:not([class*="_gridViewItem_"]) {
+  background-color: transparent !important;
 }
 
 /* brand 文案（copy 为空时不显示） */
