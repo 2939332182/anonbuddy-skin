@@ -12,7 +12,7 @@
   picked in the in-app menu (custom uploads included).
 .EXAMPLE
   .\apply.ps1
-  .\apply.ps1 -Theme genshin-dawn
+  .\apply.ps1 -Theme chunzhi-night
   .\apply.ps1 -WorkBuddyExe "D:\apps\WorkBuddy\WorkBuddy.exe"
 #>
 [CmdletBinding()]
