@@ -668,6 +668,24 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     writeLastTheme(NATIVE_MARK);
   };
 
+  // 5.6.x 的设置是独立窗口：在那边点主题只改它自己的 DOM，主窗口不会跟着变
+  // （实测：在设置窗口调 setTheme 后，主窗口的 dataset.anonbuddySkin 纹丝不动，
+  //  但 localStorage 已经写进去了）。两个窗口共享同一个 file:// origin 的
+  // localStorage，所以用 storage 事件把主题同步过去。
+  // 该事件只在"别的窗口"写入时触发，本窗口自己写不会触发，天然不会形成回环；
+  // 再加一道值比较，避免重复应用。
+  window.addEventListener("storage", (event) => {
+    if (!event || event.key !== LAST_KEY) return;
+    const current = document.documentElement.dataset.anonbuddySkin ?? null;
+    const next = event.newValue;
+    if (!next || next === NATIVE_MARK) {
+      if (current) clearTheme();
+      return;
+    }
+    if (next === current) return;
+    if (canApplyTheme(next)) setTheme(next);
+  });
+
   for (const theme of data.themes) {
     rows.set(theme.id, row(displayName(theme.id, theme.name), theme.accent, () => { setTheme(theme.id); panel.style.display = "none"; }, { id: theme.id, renamable: true, defaultLabel: theme.name }));
   }
@@ -2115,7 +2133,10 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       soundKnob.style.transform = weSound ? "translateX(18px)" : "translateX(0)";
       soundToggle.setAttribute("aria-checked", weSound ? "true" : "false");
       if (volumeInput.value !== String(weVolume)) volumeInput.value = String(weVolume);
-      volumeText.textContent = weVolume + "%";
+      // 静音时标明状态：声音开关是独立的一行，只拖音量滑块不会解除静音
+      //（浏览器不允许非静音自动播放，所以默认是静音起播）。
+      // 不提示的话很容易误判成"音量功能坏了"。
+      volumeText.textContent = weSound ? weVolume + "%" : weVolume + "% 静音";
 
       for (const [id, pill] of ratingPills) {
         const on = id === weFilter;
