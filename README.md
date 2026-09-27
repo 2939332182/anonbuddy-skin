@@ -147,7 +147,7 @@ Get-Process | Where-Object { $_.ProcessName -like '*WorkBuddy*' } | Select-Objec
 
 ### 下载即用版（不想碰命令行就用这个）
 
-去 [Releases](https://github.com/2939332182/anonbuddy-skin/releases/latest) 下载 `chihayaanon-skin-1.0.1.zip`，解压到哪儿都行，然后双击：
+去 [Releases](https://github.com/2939332182/anonbuddy-skin/releases/latest) 按上面那张表挑对应的包下载（`chihayaanon-skin-1.0.1-cn.zip` 或 `chihayaanon-skin-1.0.1-intl.zip`），解压到哪儿都行，然后双击：
 
 - Windows：`一键换肤.bat`
 - macOS：`一键换肤.command`
