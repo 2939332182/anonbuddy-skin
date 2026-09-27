@@ -4,7 +4,7 @@
 
 # AnonBuddy Skin
 
-**给 WorkBuddy 桌面端换一身会呼吸的衣服喵。**
+**给 WorkBuddy 桌面端换一身会呼吸的衣服。**
 
 <sub>换一张壁纸，换一种心情</sub>
 
