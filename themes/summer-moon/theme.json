@@ -4,9 +4,9 @@
   "name": "Summer Moon Hana 4K",
   "hero": "hero.webp",
   "colors": {
-    "accent": "#8485f3",
-    "secondary": "#9ea2f8",
+    "accent": "#8284f3",
+    "secondary": "#9ea1f8",
     "surface": "#f6f6fe",
-    "text": "#1e1e37"
+    "text": "#1d1e37"
   }
 }
