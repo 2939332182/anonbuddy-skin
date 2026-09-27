@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "aisu",
+  "name": "爱素",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#e09c84",
+    "secondary": "#d8897e",
+    "surface": "#fdf8f6",
+    "text": "#32231e"
+  }
+}

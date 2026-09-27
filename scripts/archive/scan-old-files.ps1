@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Continue'
-$outDir = 'D:\workbuddy-skin-studio\cleanup-audit'
+$outDir = 'D:\anonbuddy-skin\cleanup-audit'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $cut = (Get-Date).AddMonths(-18)

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  WorkBuddy Skin Studio - Windows apply
+  AnonBuddy Skin - Windows apply
 .DESCRIPTION
   Restart WorkBuddy with CDP enabled and apply the skin.
 .PARAMETER Port

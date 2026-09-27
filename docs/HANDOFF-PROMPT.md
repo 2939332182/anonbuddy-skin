@@ -20,9 +20,9 @@
 ## 模板（复制这一段）
 
 ```
-【任务交接】WorkBuddy 换肤插件（workbuddy-skin-studio）
+【任务交接】WorkBuddy 换肤插件（anonbuddy-skin）
 
-项目路径：D:\workbuddy-skin-studio
+项目路径：D:\anonbuddy-skin
 
 ## 请先读这些（按顺序，不要跳过）
 
@@ -41,7 +41,7 @@
 <清晰的目标。一句话说"做什么"和"做完怎么算成功">
 
 例：
-> 把插件做成可以一键安装的 npm 包，别人 `npx workbuddy-skin apply` 就能用。
+> 把插件做成可以一键安装的 npm 包，别人 `npx anonbuddy-skin apply` 就能用。
 
 ## 验收标准
 

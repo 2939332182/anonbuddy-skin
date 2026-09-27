@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "summer-moon",
+  "name": "Summer Moon Hana 4K",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#8485f3",
+    "secondary": "#9ea2f8",
+    "surface": "#f6f6fe",
+    "text": "#1e1e37"
+  }
+}

@@ -22,7 +22,7 @@ const expr = `(() => {
     if (alpha(cs.backgroundColor) < 0.5) continue;
     const r = el.getBoundingClientRect();
     if (r.width * r.height < ${MIN_AREA}) continue;
-    if (el.closest("#workbuddy-skin-menu")) continue;
+    if (el.closest("#anonbuddy-skin-menu")) continue;
     out.push({ t: el.tagName, id: el.id||"", c: (el.className||"").toString().slice(0,38),
       bg: cs.backgroundColor, w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), y: Math.round(r.y) });
   }

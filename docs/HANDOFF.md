@@ -1,7 +1,7 @@
-# 交接总结 · ChihayaAnon 插件（WorkBuddy Skin Studio）
+# 交接总结 · ChihayaAnon 插件（AnonBuddy Skin）
 
 > 面向「新开窗口继续开发」的自包含交接文档。
-> 生成时间：2026-09-20　最后提交：`8f244e7`
+> 生成时间：2026-09-20　最后提交：`af81ba5`（**另有未提交改动**：外观护栏极性化 + 皮肤列表三列网格）
 >
 > **新窗口开工前请按顺序读三处**（本文只做总览，细节不重复）：
 > 1. 本文 —— 已完成什么、现在在哪、接下来做什么
@@ -19,15 +19,15 @@
 
 | 项 | 值 |
 |---|---|
-| 工作区 | `D:\workbuddy-skin-studio` |
+| 工作区 | `D:\anonbuddy-skin` |
 | 版本 | `1.0.0` |
 | 依赖 | **零运行时依赖**（只用 Node 内置模块），需要 Node 22 |
-| 代码规模 | `src/` 11 个文件 / ~3600 行；`scripts/` 55 个 `.mjs` + 7 个 `.ps1` |
-| 内置主题 | 3 个（`wuthering-echo` 深、`genshin-dawn` 浅、`miku-488137` 浅） |
-| 测试 | **18 个 e2e（285 项断言）+ 4 个静态检查**（其中 3 个共 36 项断言，`lint-menu` 只报 OK） |
-| 当前测试结果 | `npm run test:all` = **18/18 PASS**；`npm run test:static` = 4/4 PASS |
-| 提交数 | 20 个；**本地领先 `origin/main` 12 个提交（未推送）** |
-| 远程 | `https://github.com/cdredfox/workbuddy-skin-studio.git` |
+| 代码规模 | `src/` 13 个文件 / ~4400 行；`tools/repkg/` 内置 RePKG（MIT，3.7MB）；`scripts/` 55 个 `.mjs` + 7 个 `.ps1`（顶层；另有 `scripts/archive/` 归档） |
+| 内置主题 | 3 个（`wuthering-echo` 深、`genshin-dawn` 浅、`aisu` 浅） |
+| 测试 | **20 个 e2e（390 项断言）+ 4 个静态检查**（其中 3 个共 36 项断言，`lint-menu` 只报 OK） |
+| 当前测试结果 | `npm run test:all` = **20/20 PASS**；`npm run test:static` = 4/4 PASS |
+| 提交数 | 21 个；**本地领先 `origin/main` 13 个提交（未推送）** |
+| 远程 | `https://github.com/cdredfox/anonbuddy-skin.git` |
 
 > ⚠️ 远程当前访问返回 **502**，`gh` CLI **未安装** —— 推送前先确认网络与凭据。
 
@@ -60,13 +60,20 @@
 
 ### 4. 设置面板集成（插件名 **ChihayaAnon 插件**）
 - 在 WorkBuddy 设置面板左侧「功能」分组下插入入口
-  `button#workbuddy-skin-menu-settings-entry`；
-- 右侧内容区盖一层自己的面板 `div#workbuddy-skin-menu-settings-pane`；
-- 三区块：**皮肤列表** / **上传新皮肤** / **悬浮图标显隐开关**。
+  `button#anonbuddy-skin-menu-settings-entry`；
+- 右侧内容区盖一层自己的面板 `div#anonbuddy-skin-menu-settings-pane`；
+- 三区块：**皮肤列表** / **上传新皮肤** / **悬浮图标显隐开关**，外加 **外观调节**（两个 1–100 滑块：
+  侧边栏毛玻璃强度、背景图模糊程度）。滑块只改 CSS 变量、不重建 `<style>`；
+  为支持"背景图模糊"，hero 已从 `body` 的 background 挪进 `body::before` 图层。
+- 皮肤列表是 **3 列网格**（2026-09-20 由单列改紧凑网格）：每格独立圆角卡片 +
+  `gap:6px`，9 个主题正好 3×3，列表高度约减半。选中态 = 底色 + ✓ + 强调色描边。
 
 ### 5. 与 WorkBuddy 自带「外观（浅色/深色）」联动
 - 切浅色系主题 → 外观自动浅色；切深色系 → 外观自动深色；
-- **浅色系主题生效期间禁止切深色**（三层护栏：视觉禁用 + 捕获拦截 + 轮询兜底）；
+- **皮肤与外观必须同深浅：护栏锁住"与皮肤相反的那一侧"**（2026-09-20 由单向改为极性化）：
+  - 浅色系主题生效期间**禁止切深色**；
+  - 深色系主题生效期间**禁止切浅色**（深底皮肤配浅色外观会露出原生浅色底，显示异常）；
+  - 三层护栏：视觉禁用 + 捕获拦截 + 轮询兜底；锁定侧记在 `<html data-wb-appearance-lock>`。
 - 选「原生」时**完整交还控制权**（撤 `data-skin`、解护栏、恢复用户偏好）。
 
 ### 6. 工程化
@@ -114,6 +121,9 @@
 |---|---|
 | `docs/ARCHITECTURE.md` | ★ 面向维护者：架构、映射表、不变量、写测试规矩、已知问题 |
 | `docs/HANDOFF.md` | 本文（交接总结） |
+| `docs/HANDOFF-BRIEF.html` | 本文的**结构化速览页**（单文件 HTML，深色主题，可直接浏览/打印） |
+| `docs/WE-INTEGRATION.md` | **Wallpaper Engine 集成**：可行性分析 + 实现说明（内置 RePKG） |
+| `docs/HANDOVER-FOR-AGENT.md` | **交给其他 agent 的交接文档**：架构定位 / 已完成未完成 / 已知 bug（含复现条件与影响范围）/ 风险与待确认 / 修补优先级 / 接手须知 |
 | `docs/HANDOFF-PROMPT.md` | 交给新窗口的**填空模板** |
 | `README.md` | 面向使用者 |
 | `SKILL.md` | 面向 AI 的自动安装流程 |
@@ -150,11 +160,11 @@ localStorage（**唯一**的持久化通道）
 
 | 键 | 内容 |
 |---|---|
-| `workbuddySkinLastTheme` | 上次用的主题 id（`__native__` = 原生） |
+| `anonbuddySkinLastTheme` | 上次用的主题 id（`__native__` = 原生） |
 | `workbuddyCustomThemes` | 自定义主题数组 `[{id,name,dataUrl,colors}]` |
-| `workbuddySkinAliases` | 显示名别名表 `{id: 别名}` |
-| `workbuddySkinMenuPos` | 🎨 图标位置，**贴边锚点格式** `{ax:"left"\|"right", dx, y}` |
-| `workbuddySkinIconHidden` | 悬浮图标显隐 `"1"` / `"0"` |
+| `anonbuddySkinAliases` | 显示名别名表 `{id: 别名}` |
+| `anonbuddySkinMenuPos` | 🎨 图标位置，**贴边锚点格式** `{ax:"left"\|"right", dx, y}` |
+| `anonbuddySkinIconHidden` | 悬浮图标显隐 `"1"` / `"0"` |
 | `workbuddyCustomTheme` | **旧版遗留**，首次运行迁移后删除，勿再用 |
 
 外观联动还会读写 WorkBuddy **原生**的键（不是我们的，但必须理解）：
@@ -225,6 +235,16 @@ npm run test:list          # 看套件与用例（含"为什么这个用例存�
 |---|---|---|---|
 | **作用域泄漏**（`8f244e7`） | 切「原生」后点设置面板的插件条目**毫无反应** | `syncPaneThemeVars()` 的强调色兜底链最后一级直接引用了 Node 侧常量 `DEFAULT_ACCENT`，renderer 里不存在 → 运行时 `ReferenceError`，被 click 处理器吞掉 | `lint-menu.mjs` 新增**作用域泄漏体检**（把模板外的模块作用域声明名逐个扫产物） |
 | **空刷 class 卡顿**（`b008c10`） | 切深色主题卡 55~65ms，严重时主线程卡死 | `classList.toggle(cls, false)` 在类不存在时什么都不改却照样触发全量样式重匹配（~2600 条规则 × ~3200 元素） | `syncModeClasses()` 先 `contains(cls) === want` 就 `continue`；回归 `test-theme-switch-perf` |
+| **空跑断言**（2026-09-20） | 「点击被拦」这类断言即使把拦截代码删掉也照样 PASS | 皮肤接管期间原生本来就被 `data-skin` 挡住，外观**不会变** → 只断言"外观没变"测不出有没有拦截 | 测试里装**冒泡阶段探针**：捕获阶段 `stopImmediatePropagation` 会掐断整条链 → 计数 0；放行 ≥ 1。⚠️ 探针必须盯 `pointerdown`，`click` 恒为 0（浮层在 pointerdown 上就自己关了） |
+| **切主题后自带外观不刷新**（2026-09-20） | 在插件设置里切主题，自带外观深浅不对，**点一下左下角个人中心才变正常** | `applyMode` **漏写 `html[data-theme]`** —— 原生写它的入口 `ThemeManager.applyTheme` 见到 `data-skin` 会提前 return，于是皮肤接管期间没人写它，它停在接管前的旧值，靠它取色的自带 UI 要等 React 重渲染才更新 | `applyMode` 把四项输出**写全**（类名 / `data-vscode-theme-kind` / `-name` / `data-theme` / `colorScheme`）；回归 `test-appearance-linkage` + `test-settings-panel` 6b 节 |
+| **RePKG 解包残留吃掉 2GB**（2026-09-20） | 缓存目录膨胀到 2.2GB | 解包中间产物 `raw/`（tex 原件 + 其余贴图）没清干净：进程被杀时走不到清理那一行 | `try/finally` 收尾 + `sweepStrayRaw()` 启动时扫残留。⚠️ 只留 `hero.png` 时 27 个条目才 125MB |
+| **`-e png` 一张都解不出来**（2026-09-20） | RePKG 跑完但产物为空 | pkg 里贴图的**原扩展名是 `.tex`**，`-e png` 匹配不到任何条目；RePKG 是"提取 tex 时顺手转 png" | 必须写 `-e tex` |
+| **WE 条目翻倍**（2026-09-20） | 盘点出 76 条，实际只有 38 条 | Windows 路径大小写不敏感，`D://Steam` 与 `D://steam` 是同一目录，候选列表里两种写法都命中 | 路径比较统一走 `pathKey()`（win32 下转小写） |
+| **有 `<video>` 时截图卡死**（2026-09-20） | `Page.captureScreenshot` 超时，连带用截图做断言的测试挂掉 | 背景层挂着 `<video>`（硬件解码面）时 CDP 截图读回会卡；`fromSurface:false` 能返回但采不到视频层 | 截图类测试必须在"无视频"状态下跑 —— `test-we` 收尾强制切回普通主题；需要截图时先 `visibility:hidden` 视频 |
+| **面板变量白算**（2026-09-20） | 「重复应用同一主题」从 ~0ms 涨到 53.8ms | `applyMode` 末尾新增的 `refreshPaneChrome()` 无条件往面板写 7 个自定义属性 → 面板子树（弹窗 2700+ 元素）样式失效 | **始终重算、只在值变了才写**。⚠️ 不能改成"面板没显示就跳过"——那样面板关闭期间切主题强调色会停在旧值 |
+| **背景图整个看不见**（2026-09-20） | 计算样式全对，但背景图完全不可见；拖"背景图模糊"也几乎无视觉变化（整屏 PNG 只差 34/160000 字节） | hero 放在负 z-index 图层里，而 `html` 有原生不透明白底 → `body` 的背景不再"上交给画布"，作为普通元素背景在绘制第 3 步绘制，**晚于**负 z-index 图层的第 2 步 → 把图层整个盖住 | `body` 改 `transparent`，底色挪进图层自身。回归 `test-tunables` 的**像素级**断言（显示/隐藏比值 > 1.5） |
+| **拖滑块卡顿 ~33fps**（2026-09-20） | 拖动两个调节项明显掉帧 | 值写在 html 的自定义属性上 —— 在 html 上 `setProperty` 写**任何**自定义属性（哪怕没人用）都会触发全文档重算（2269 元素 ≈ 23ms/次） | 改成写真实元素的内联样式（`filter`/`inset`/`backdrop-filter`）→ 0ms。⚠️ 顺带发现：弹窗打开时改**任意文本**要 29ms，所以数字读数改成松手才刷新 |
+| **面板配色停在打开那一刻**（2026-09-20） | 面板开着时切主题，面板自身配色不跟着变（深色弹窗配浅色变量 → 浅字压白底，像空的） | 面板的 `--wb-pane-*` 是按「弹窗自身底色」算的，而它只在 `openPluginPane()` 里算一次 | `applyMode()` 末尾调 `refreshPaneChrome()` 重算。⚠️ 钩子要**前置声明成空函数**，否则撞 `const` 的 TDZ（`applyMode` 初始化阶段就会跑） |
 
 ### 5.2 当前无失败测试，但有以下**已知非回归项**
 
@@ -232,15 +252,15 @@ npm run test:list          # 看套件与用例（含"为什么这个用例存�
 
 | 测试 | 现象 | 判断依据 |
 |---|---|---|
-| `test-window-layout` | 「当前贴边距离与存储的锚点一致」`59 vs dx=21` | `workbuddySkinMenuPos` 里的锚点与实际渲染位置不一致（历史数据）。**当前已通过**（图标位置被调整过） |
-| `test-menu-icon` / `test-drag` | `AFTER=null`、`saved=null` | `workbuddySkinMenuPos` 为 `null` 时拖拽后查询图标元素返回空。**当前已通过** |
+| `test-window-layout` | 「当前贴边距离与存储的锚点一致」`59 vs dx=21` | `anonbuddySkinMenuPos` 里的锚点与实际渲染位置不一致（历史数据）。**当前已通过**（图标位置被调整过） |
+| `test-menu-icon` / `test-drag` | `AFTER=null`、`saved=null` | `anonbuddySkinMenuPos` 为 `null` 时拖拽后查询图标元素返回空。**当前已通过** |
 
 > 判定方法：`git stash` → `node apply-now.mjs` → 单跑该测试。干净树也红 = 环境问题。
 
 ### 5.3 待办 / 未做的事
 
-- [ ] **推送到 GitHub**：本地领先 12 个提交未推送（远程当前 502，`gh` 未安装）。
-- [ ] **仓库改名**：现名 `workbuddy-skin-studio`，用户希望项目名统一为 **ChihayaAnon 插件**
+- [ ] **推送到 GitHub**：本地领先 13 个提交未推送（远程当前 502，`gh` 未安装）。
+- [ ] **仓库改名**：现名 `anonbuddy-skin`，用户希望项目名统一为 **ChihayaAnon 插件**
       （应用内显示名已经是「ChihayaAnon 插件」，但仓库名 / `package.json` 的 `name` 还是旧的）。
 - [ ] **README 英文版**：目前只有中文版，公开前建议补。
 - [ ] **主题包导入/导出**：现在自定义主题只能存在本机 `localStorage`，无法分享。
@@ -260,8 +280,8 @@ npm run test:list          # 看套件与用例（含"为什么这个用例存�
 | 位置 | 现状 | 建议 |
 |---|---|---|
 | 应用内显示名 | ✅ `ChihayaAnon 插件` | 保持 |
-| GitHub 仓库名 | `workbuddy-skin-studio` | 建议改为 `chihaya-anon-skin`（GitHub 仓库名不支持中文，用拼音/英文） |
-| `package.json` 的 `name` | `workbuddy-skin-studio` | 同上改齐 |
+| GitHub 仓库名 | `anonbuddy-skin` | 建议改为 `chihaya-anon-skin`（GitHub 仓库名不支持中文，用拼音/英文） |
+| `package.json` 的 `name` | `anonbuddy-skin` | 同上改齐 |
 
 > ⚠️ **改 GitHub 仓库名必须在 GitHub 网页端操作**（`Settings → Repository name`），
 > 或装 `gh` 后 `gh repo rename`。改完要同步本地远程地址：
@@ -282,7 +302,7 @@ git status              # 干净
 - [ ] **确认无硬编码本机路径**：`test-scripts-registry` 会拦截回归。
 - [ ] **确认 `.ps1` 全是纯 ASCII**：`npm run test:static` 逐字节检查。
 - [ ] **License 已在**（MIT）。
-- [ ] **首次推送**：`git push -u origin main`（本地领先 12 个提交）。
+- [ ] **首次推送**：`git push -u origin main`（本地领先 13 个提交）。
 
 ### 6.3 建议的长期仓库结构
 
@@ -328,8 +348,11 @@ assets/                # 插件图标素材
    否则旧实例会持续捣乱（表现：第一次 `pause` 有效、之后全失效）。
    回归 `test-reapply-idempotent`。
 4. **`applyMode()` 不许空刷深浅色 class** —— 见 5.1。改它必跑 `test-theme-switch-perf`。
-5. **`.ps1` 必须纯 ASCII**（PS 5.1 读无 BOM UTF-8 按 GBK 解析，中文乱码破坏语法）。
-6. **不要用 renderer 的 canvas 做图像处理**：CDP 超时后挂起的 `img.decode()` 会堵死解码队列，
+5. **`applyMode()` 必须把「原生会写、我们接管了」的输出全部写全**：类名三件套、`body[data-vscode-theme-kind]`、
+   `body[data-vscode-theme-name]`、**`html[data-theme]`**、`html.style.colorScheme`。漏一个就会停在接管前的旧值
+   （原生那条路径被 `data-skin` 提前 return 掉了）。**这是"切主题后界面不刷新"的典型根因** —— 见 5.1。
+6. **`.ps1` 必须纯 ASCII**（PS 5.1 读无 BOM UTF-8 按 GBK 解析，中文乱码破坏语法）。
+7. **不要用 renderer 的 canvas 做图像处理**：CDP 超时后挂起的 `img.decode()` 会堵死解码队列，
    连带 `Page.captureScreenshot` 卡住。图像一律走 Python + Pillow。
 
 ### 7.2 布局不变量（改 CSS 前读）
@@ -347,12 +370,15 @@ assets/                # 插件图标素材
 - **新写测试一律用 `scripts/_harness.mjs`**，不要抄 CDP 连接和 `check()`（`test-scripts-registry` 会拦截）。
 - **测试之间不许互相踩**：造成全屏遮罩的测试收尾必须关掉并断言已关
   （新增遮罩选择器要加进 `BLOCKING_OVERLAYS`）。
-- **除了界面，还要还原被你改过的 `localStorage` 键**：`setTheme` 会写 `workbuddySkinLastTheme`，
+- **除了界面，还要还原被你改过的 `localStorage` 键**：`setTheme` 会写 `anonbuddySkinLastTheme`，
   而很多测试用 `applyLast()` 还原，读的正是这个键。顺序：**先按已知主题显式还原、再把快照写回**。
 - **`finish()` 会关闭 CDP 会话**，之后 `currentThemeId()` 返回 `null` → 断言要在 `finish()` 之前。
 - **别死等固定时长**，用 `waitFor(fn, { waitMs, stepMs })` 条件轮询。
 - 弹浮层要用真鼠标事件（`Input.dispatchMouseEvent`），DOM `.click()` 不可靠。
 - **每次修 bug 都要反证测试会变红**。
+- ⚠️ **当心"空跑断言"**：只断言"最终状态没变"往往测不出拦截逻辑有没有生效
+  （皮肤接管期间原生本来就被 `data-skin` 挡住）。要断言**中间过程**——
+  例：外观护栏测试在被观测页装冒泡阶段探针，数 `pointerdown` 有没有到达目标。
 
 ### 7.4 诊断手法速查
 

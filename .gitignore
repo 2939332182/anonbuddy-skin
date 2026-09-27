@@ -32,3 +32,18 @@ themes-removed/
 
 # 与本项目无关的笔记
 /docs/*.html
+
+
+
+# RePKG（MIT，NativeAOT 单文件 3.7MB，**不需要 .NET 运行时**）随仓库分发 —— 见 docs/WE-INTEGRATION.md。
+# 它只把 scene 壁纸的贴图解成静态图（拿不到动效，RePKG 不执行着色器）。
+# 解包产物落在用户级缓存目录，不在仓库里。
+tools/repkg/*.pdb
+
+# RePKG（MIT，NativeAOT 单文件 3.7MB，**不需要 .NET 运行时**）随仓库分发 —— 见 docs/WE-INTEGRATION.md。
+# 它只把 scene 壁纸的贴图解成静态图（拿不到动效，RePKG 不执行着色器）。
+# 解包产物落在用户级缓存目录，不在仓库里。
+tools/repkg/*.pdb
+
+# ---- 本机备份（改名 / 换肤 / 主题调整时留下的快照，不进仓库）----
+.backup-*/

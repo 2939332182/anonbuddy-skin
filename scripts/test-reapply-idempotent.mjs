@@ -1,5 +1,5 @@
 // 回归测试：反复 apply 不能泄漏旧实例。
-// 背景（踩过的坑）：apply 每次都会 eval 一遍整段注入脚本，旧版本只删了 #workbuddy-skin-menu
+// 背景（踩过的坑）：apply 每次都会 eval 一遍整段注入脚本，旧版本只删了 #anonbuddy-skin-menu
 // DOM 节点，却没停掉旧实例的 MutationObserver + 1.5s setInterval。于是每 apply 一次就多一个
 // 活的旧实例，它们会持续把主标题拆成逐字节点 —— 表现是 pause 时已经合并好的文本被"拆回去"，
 // 看起来像 restore 完全失效（第一次 pause 有效，之后全部无效）。
@@ -18,12 +18,12 @@ const probe = () => session.evaluate(`(() => {
     title: h1?.textContent?.trim() ?? null,
     chars: document.querySelectorAll(".wb-home-header__title span > i").length,
     brand: document.querySelector(".logo-workbuddy-title")?.textContent?.trim() ?? null,
-    hasStyle: Boolean(document.getElementById("workbuddy-skin-style")),
-    hasMenu: Boolean(document.getElementById("workbuddy-skin-menu")),
-    hasApi: Boolean(window.__workbuddySkin),
-    menuRoots: document.querySelectorAll("#workbuddy-skin-menu").length,
-    styleEls: document.querySelectorAll("#workbuddy-skin-style").length,
-    themeId: document.documentElement.dataset.workbuddySkin ?? null,
+    hasStyle: Boolean(document.getElementById("anonbuddy-skin-style")),
+    hasMenu: Boolean(document.getElementById("anonbuddy-skin-menu")),
+    hasApi: Boolean(window.__anonbuddySkin),
+    menuRoots: document.querySelectorAll("#anonbuddy-skin-menu").length,
+    styleEls: document.querySelectorAll("#anonbuddy-skin-style").length,
+    themeId: document.documentElement.dataset.anonbuddySkin ?? null,
   };
 })()`);
 
@@ -35,7 +35,7 @@ await session.evaluate(`(() => {
 await new Promise((r) => setTimeout(r, 1500));
 
 const menuThemes = await t.loadMenuThemes();
-const fallback = menuThemes.find((x) => x.manifest.id === "miku-488137") ?? menuThemes[0];
+const fallback = menuThemes.find((x) => x.manifest.id === "aisu") ?? menuThemes[0];
 
 const before = await probe();
 const restoreThemeId = before.themeId;

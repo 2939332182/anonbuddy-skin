@@ -1,7 +1,7 @@
 // 生成最终清理结果报告
 import fs from 'node:fs';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 
 // 各项实际清理结果
 const results = [
@@ -75,7 +75,7 @@ md += `
 
 ---
 
-*数据文件位于 \`D:\\workbuddy-skin-studio\\cleanup-audit\\\`*
+*数据文件位于 \`D:\\anonbuddy-skin\\cleanup-audit\\\`*
 `;
 fs.writeFileSync(`${OUT}/清理执行报告.md`, md, 'utf8');
 console.log(md);

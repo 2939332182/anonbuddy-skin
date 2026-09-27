@@ -1,5 +1,5 @@
 {
-  "name": "workbuddy-skin-studio",
+  "name": "anonbuddy-skin",
   "version": "1.0.0",
   "private": true,
   "description": "给 WorkBuddy 桌面端换肤：注入式主题系统（不改 app.asar），带主题菜单与逐字打字标题动画",
@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "bin": {
-    "workbuddy-skin": "src/cli.mjs"
+    "anonbuddy-skin": "src/cli.mjs"
   },
   "scripts": {
     "apply": "node apply-now.mjs",
@@ -18,7 +18,6 @@
     "list": "node src/cli.mjs list",
     "create": "node src/cli.mjs create",
     "doctor": "node src/cli.mjs doctor",
-
     "lint": "node scripts/lint-menu.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:static": "node scripts/run-tests.mjs --suite static",
@@ -27,8 +26,8 @@
     "test:menu": "node scripts/run-tests.mjs --suite menu",
     "test:all": "node scripts/run-tests.mjs --suite all",
     "test:list": "node scripts/run-tests.mjs --list",
-
     "find": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find-workbuddy.ps1",
-    "shot": "node scripts/shot-home.mjs"
+    "shot": "node scripts/shot-home.mjs",
+    "we:extract": "node src/cli.mjs we-extract"
   }
 }

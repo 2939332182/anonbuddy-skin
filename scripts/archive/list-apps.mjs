@@ -2,7 +2,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 fs.mkdirSync(OUT, { recursive: true });
 
 const keys = [

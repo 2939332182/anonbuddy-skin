@@ -22,7 +22,7 @@ console.log(`素材文件：${iconFile ?? "(无，应走 emoji)"}`);
 const { session } = t;
 
 const info = await session.evaluate(`(() => {
-  const btn = document.querySelector("#workbuddy-skin-menu > button");
+  const btn = document.querySelector("#anonbuddy-skin-menu > button");
   if (!btn) return null;
   const cs = getComputedStyle(btn);
   const b = btn.getBoundingClientRect();
@@ -37,7 +37,7 @@ const info = await session.evaluate(`(() => {
 })()`);
 
 if (!info) {
-  t.check("图标按钮存在", false, "找不到 #workbuddy-skin-menu > button");
+  t.check("图标按钮存在", false, "找不到 #anonbuddy-skin-menu > button");
 } else {
   t.check("图标按钮存在且为 38×38 圆形", info.w === 38 && info.h === 38 && info.radius === "50%", `${info.w}×${info.h} ${info.radius}`);
   if (iconFile) {

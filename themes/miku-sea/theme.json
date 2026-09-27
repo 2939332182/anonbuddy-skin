@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "miku-sea",
+  "name": "Hatsune Miku · 海色",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#0d9cfa",
+    "secondary": "#1aa4f9",
+    "surface": "#eef8ff",
+    "text": "#032338"
+  }
+}

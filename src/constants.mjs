@@ -1,11 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const PRODUCT_ID = "workbuddy-skin-studio";
-export const PRODUCT_NAME = "WorkBuddy Skin Studio";
+export const PRODUCT_ID = "anonbuddy-skin";
+export const PRODUCT_NAME = "AnonBuddy Skin";
 export const STATE_SCHEMA_VERSION = 1;
 export const THEME_SCHEMA_VERSION = 1;
-export const DEFAULT_THEME_ID = "miku-488137";
+export const DEFAULT_THEME_ID = "aisu";
 export const DEFAULT_CDP_PORT = 9333;
 export const EXPECTED_BUNDLE_ID = "com.workbuddy.workbuddy";
 
@@ -16,8 +16,8 @@ export function resolveStudioPaths({ home = homedir() } = {}) {
   const isWin = process.platform === "win32";
   const installRoot = join(home, ".workbuddy", PRODUCT_ID);
   const stateRoot = isWin
-    ? join(process.env.LOCALAPPDATA || join(home, "AppData", "Local"), "WorkBuddySkinStudio")
-    : join(home, "Library", "Application Support", "WorkBuddySkinStudio");
+    ? join(process.env.LOCALAPPDATA || join(home, "AppData", "Local"), "AnonBuddySkin")
+    : join(home, "Library", "Application Support", "AnonBuddySkin");
 
   return {
     installRoot,

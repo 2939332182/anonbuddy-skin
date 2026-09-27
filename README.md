@@ -1,4 +1,4 @@
-# WorkBuddy Skin Studio · WorkBuddy 换肤工作室
+# AnonBuddy Skin · WorkBuddy 换肤工作室
 
 **给 WorkBuddy 桌面端换一张会呼吸的脸。**
 
@@ -25,8 +25,9 @@
 - **自定义上传**：菜单里选「＋ 自定义图片」直接上传本地图片，自动按图片风格取色（主色、辅色、面板底色、文字色），即点即换；**每次上传都新增一个主题，之前上传的全部保留**
 - **右键菜单**：右键主题行可「重命名」或「删除」——改名只改显示名、不动磁盘上的主题目录，重启后依然保留；删除收进菜单后行尾不再挂 ×，面板更窄
 - **一张图片就是一个主题**：任意 PNG、JPG、JPEG、WebP 直接生成皮肤（配色 + 背景底图）
-- **3 个内置预设**：Miku 488137、原神 · 晨曦、鸣潮 · 共鸣（其余主题在 `themes-removed/`，移回即可恢复）
+- **5 个内置主题**：爱素、春至双背景 · 昼、春至双背景 · 夜、Hatsune Miku · 海色、Summer Moon Hana 4K —— 全部随仓库分发，任何人 clone 后开箱即用
 - **记住上次主题**：WorkBuddy 重启后自动恢复你上次在菜单里选的主题，**自定义上传的图片也能恢复**；选了「原生界面」也会记住
+- **开机默认主题**：在主题行上右键选「设为开机默认主题」，以后每次启动都以它开局（优先级高于“上次选的主题”，可随时取消）
 - **深浅色自动适配**：根据主题配色的 surface 明度自动切换 WorkBuddy 的 `data-vscode-theme-kind`，让 VS Code 原生控件（输入框、按钮等）跟着深浅色变
 - **双平台**：macOS（`.command`）+ Windows（`.ps1`）
 - **随时还原**：暂停皮肤或切回原生界面，官方安装包始终原封不动
@@ -43,7 +44,7 @@
 
 AI 会克隆仓库、读取根目录的 [`SKILL.md`](SKILL.md)，自动完成**平台检测 → 运行对应 apply 脚本 → 注入主题 → 验证状态**，你只需在弹窗里保存好 WorkBuddy 当前任务即可。换肤后日常切换仍在右上角 🎨 菜单里进行。
 
-> 想指定主题也可直接说，例如「用深色原神主题」或「帮我换成 miku-light」。
+> 想指定主题也可直接说，例如「用深色原神主题」或「帮我换成海色」。
 
 ### macOS
 
@@ -52,7 +53,7 @@ AI 会克隆仓库、读取根目录的 [`SKILL.md`](SKILL.md)，自动完成**�
 ./scripts/apply.command
 
 # 或指定主题
-node src/cli.mjs apply --theme genshin-dawn
+node src/cli.mjs apply --theme chunzhi-night
 ```
 
 ### Windows
@@ -62,7 +63,7 @@ node src/cli.mjs apply --theme genshin-dawn
 .\scripts\apply.ps1
 
 # 或指定主题
-.\scripts\apply.ps1 -Theme genshin-dawn
+.\scripts\apply.ps1 -Theme chunzhi-night
 
 # 若找不到 WorkBuddy.exe，先跑排查脚本：
 .\scripts\find-workbuddy.ps1
@@ -186,9 +187,9 @@ const HERO_TITLE_TEXT = "\u63a2\u7d22\u672a\u81f3\u4e4b\u5883";   // 欢迎页�
   观察器会在下一帧改回去（已做 rAF 节流）。
 - **原文案是白名单匹配**（`BRAND_ORIGINALS` / `HERO_ORIGINALS`），只替换已知的原生
   文案，避免误伤用户输入的内容。多语言下的其它语种文案需要自己加进白名单。
-- `pause` 卸载皮肤时会连带还原（`removeSkin` 里调 `__workbuddySkin.copy.restore()`）。
+- `pause` 卸载皮肤时会连带还原（`removeSkin` 里调 `__anonbuddySkin.copy.restore()`）。
 - ⚠️ **重复 `apply` 必须幂等**。`apply` 每次都会把整段脚本重新 eval 一遍，所以脚本开头
-  必须先停掉上一个实例（`copy.stop()` + `dispose()`），只删 `#workbuddy-skin-menu`
+  必须先停掉上一个实例（`copy.stop()` + `dispose()`），只删 `#anonbuddy-skin-menu`
   节点是不够的 —— 旧实例的 `MutationObserver` 和 1.5s `setInterval` 还活着，
   会持续把标题拆成逐字节点。踩过的表现：**第一次 `pause` 能还原，之后每次 `pause` 都失效**
   （因为旧实例把刚合并好的文本又拆回去了）。`scripts/test-reapply-idempotent.mjs` 守这条不变量。
@@ -202,7 +203,7 @@ const HERO_TITLE_TEXT = "\u63a2\u7d22\u672a\u81f3\u4e4b\u5883";   // 欢迎页�
 | 字距 | `letter-spacing: .1em`（+ `padding-right: 1em` 抵消末字间距，保持视觉居中）|
 | 主题色渐变 | `background-image: linear-gradient(...)` + `-webkit-background-clip: text` + `-webkit-text-fill-color: transparent` |
 | 日系轻小说描边 | `-webkit-text-stroke: 0.03em rgb(from <中和色> r g b / 0.5)` |
-| 逐字打字入场 | 主标题按字拆成 `<i>`，每字 `@keyframes workbuddy-skin-char-type-in`，`animation-delay` 按 `--wb-char-index` 递增（步长 `.075s`）|
+| 逐字打字入场 | 主标题按字拆成 `<i>`，每字 `@keyframes anonbuddy-skin-char-type-in`，`animation-delay` 按 `--wb-char-index` 递增（步长 `.075s`）|
 | 浅色衬边 | `.wb-home-header__title-wrap::before` 径向渐变，把字从同色系背景里托出来 |
 
 踩过的坑（改之前务必看）：
@@ -315,20 +316,19 @@ e2e 依赖**真实运行中的 WorkBuddy**（它通过 CDP 连过去断言真实
 
 ## 内置主题
 
-| 主题 id | 名称 | 风格 | 深浅 |
+| 主题 id | 名称 | 强调色 | 深浅 |
 |---|---|---|---|
-| `miku-488137` | Miku 488137 | 青绿 · 高精度 | 浅色 |
-| `genshin-dawn` | 原神 · 晨曦 | 蓝 | 浅色 |
-| `wuthering-echo` | 鸣潮 · 共鸣 | 青紫 | **深色** |
+| `aisu` | 爱素 | 夕橙 `#e09c84` | 浅色 |
+| `chunzhi-day` | 春至双背景 · 昼 | 樱粉 `#dd9fa6` | 浅色 |
+| `chunzhi-night` | 春至双背景 · 夜 | 夜蓝 `#5d81da` | 浅色 |
+| `miku-sea` | Hatsune Miku · 海色 | 海蓝 `#0d9cfa` | 浅色 |
+| `summer-moon` | Summer Moon Hana 4K | 蓝紫 `#8485f3` | 浅色 |
 
 > 深浅由 `theme.json` 的 `colors.surface` 自动判定，并会**联动 WorkBuddy 自带的外观（浅色/深色）**：
 > 切浅色系主题 → 外观变浅色，切深色系 → 外观变深色；浅色系主题生效期间禁止切深色。
 
-暂时用不到的主题没有删掉，只是移到了 `themes-removed/`（`miku-light`、`genshin-night`、
-`wuthering-tide`、恋与深空 ×2、火影忍者 ×2）。把目录移回 `themes/` 再 apply 一次，
-它就会重新出现在 🎨 菜单里。
-
-> `themes-removed/` 是本机存档，不进 git（见 `.gitignore`）。
+自带主题全部随仓库分发，不存在“本机存档”一说。想自己加主题：把 `theme.json` + `hero.webp` 放进
+`themes/<id>/`（id 需为小写字母、数字与连字符）再 apply 一次即可。
 
 ## 设计边界
 

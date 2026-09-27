@@ -76,12 +76,12 @@ if (fatal.length) {
 
 const code = buildSkinMenuScript({
   entries: [
-    { id: "miku-488137", name: "Miku 488137", accent: "#39c5bb", surface: "#f7fbff", css: "/*a*/" },
+    { id: "aisu", name: "Miku 488137", accent: "#39c5bb", surface: "#f7fbff", css: "/*a*/" },
     { id: "genshin-night", name: "原神 · 星夜", accent: "#7b6bd6", surface: "#12121a", css: "/*b*/" },
   ],
-  activeId: "miku-488137",
-  styleId: "workbuddy-skin-style",
-  menuId: "workbuddy-skin-menu",
+  activeId: "aisu",
+  styleId: "anonbuddy-skin-style",
+  menuId: "anonbuddy-skin-menu",
   cssTemplate: "/*tpl*/",
 });
 
@@ -202,7 +202,7 @@ if (missing.length) {
 // 皮肤 CSS 的关键规则也要在（这些是踩过坑才加的，删掉会静默回归）
 const requiredCss = [
   ["欢迎页主标题", ".wb-home-header__title"],
-  ["逐字打字动画", "workbuddy-skin-char-type-in"],
+  ["逐字打字动画", "anonbuddy-skin-char-type-in"],
   ["逐字延迟（按序号递增）", "--wb-char-index"],
   ["标题字距", "letter-spacing"],
   ["标题描边", "-webkit-text-stroke"],

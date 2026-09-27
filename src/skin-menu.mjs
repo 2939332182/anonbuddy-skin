@@ -13,7 +13,7 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
-export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null }) {
+export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
   }
@@ -40,6 +40,11 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     // 插件图标（可选）：给了就贴图，没给就用默认的 🎨 emoji
     icon: ICON_DATA_URL.test(iconDataUrl ?? "") ? iconDataUrl : null,
     sentinels: CSS_SENTINELS,
+    // Wallpaper Engine 壁纸目录（本机路径，方案 A：file:// 直读）。
+    // 只含 id/标题/类型/体积/两个 file:// URL，几 KB —— 不传媒体字节。
+    weItems: Array.isArray(weItems) ? weItems.filter((x) => x && typeof x.id === "string" && typeof x.fileUrl === "string") : [],
+    // 装了 RePKG 就能把 scene 的静态图从 1K 缩略图升级到 4K 原图（见 we-extract.mjs）
+    weRepkgAvailable: Boolean(weRepkgAvailable),
     // 旧版单主题：id 固定 custom-upload，键 workbuddyCustomTheme（首次运行会迁移进 customListKey）
     customId: "custom-upload",
     storageKey: "workbuddyCustomTheme",
@@ -63,9 +68,9 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 还活着，会继续把主标题拆成逐字节点。结果就是 pause 时已经合并好的文本被旧实例
   // "拆回去"，看起来像 restore 完全失效（实测踩过：第一次 pause 有效，之后全部无效）。
   // 所以这里必须显式把上一个实例停掉，且顺序在创建新实例之前。
-  try { window.__workbuddySkin?.copy?.stop?.(); } catch {}
-  try { window.__workbuddySkin?.dispose?.(); } catch {}
-  delete window.__workbuddySkin;
+  try { window.__anonbuddySkin?.copy?.stop?.(); } catch {}
+  try { window.__anonbuddySkin?.dispose?.(); } catch {}
+  delete window.__anonbuddySkin;
 
   let style = document.getElementById(data.styleId);
   if (!style) {
@@ -81,7 +86,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   const button = document.createElement("button");
   button.type = "button";
-  button.title = "WorkBuddy Skin Studio\\uff08\\u53ef\\u62d6\\u52a8\\uff09";
+  button.title = "AnonBuddy Skin\\uff08\\u53ef\\u62d6\\u52a8\\uff09";
   // 按钮外形统一，只有"图标来源"分两种：自定义图片 / 默认 emoji
   const buttonBase = "display:block;width:38px;height:38px;border-radius:50%;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);box-shadow:0 3px 12px rgba(0,0,0,.24);cursor:grab;line-height:1;padding:0;touch-action:none;";
   if (data.icon) {
@@ -104,7 +109,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   };
   // ---- 主题别名：右键重命名，结果存 localStorage（与自定义主题、图标位置同一套持久化）----
   // 只改显示名，不动磁盘上的主题目录 / theme.json，所以内置主题也能改名。
-  const ALIAS_KEY = "workbuddySkinAliases";
+  const ALIAS_KEY = "anonbuddySkinAliases";
   const NATIVE_ALIAS_KEY = "__native__";
   const aliasKeyOf = (id) => (id === null ? NATIVE_ALIAS_KEY : String(id));
   let aliases = (() => {
@@ -201,6 +206,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     const id = item.__themeId;
     ctxMenu.textContent = "";
     ctxMenu.appendChild(ctxItem("\\u91cd\\u547d\\u540d", { onClick: () => { closeCtxMenu(); beginRename(item); } }));
+    // 「设为开机默认主题」：只给普通主题开放  WE 壁纸条目（we-<id>）引用本机绝对路径，
+    // 换台机器就是死链，设成开机默认只会得到一个失效的开局，所以干脆不给这个入口。
+    if (typeof id === "string" && id !== "" && id.indexOf("we-") !== 0) {
+      const isBoot = readBootTheme() === id;
+      ctxMenu.appendChild(ctxItem(isBoot ? "\\u2713 \\u5f00\\u673a\\u9ed8\\u8ba4" : "\\u8bbe\\u4e3a\\u5f00\\u673a\\u9ed8\\u8ba4\\u4e3b\\u9898", {
+        onClick: () => { closeCtxMenu(); writeBootTheme(isBoot ? null : id); },
+      }));
+    }
     if (customRows.has(id)) {
       ctxMenu.appendChild(ctxItem("\\u5220\\u9664", { danger: true, onClick: (el) => {
         // 自定义主题只存在于 localStorage，删掉就真没了 —— 用两次点击代替 confirm（Electron 里没有 window.confirm）
@@ -241,8 +254,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     item.__defaultLabel = options.defaultLabel ?? label;
     item.__themeId = options.renamable ? (options.id ?? null) : undefined;
     item.__hint = options.menuHint ?? "\\uff08\\u53f3\\u952e\\u91cd\\u547d\\u540d\\uff09";
-    item.addEventListener("mouseenter", () => { if (item.style.fontWeight !== "700") item.style.background = "rgba(0,0,0,.05)"; });
-    item.addEventListener("mouseleave", () => paint(document.documentElement.dataset.workbuddySkin ?? null));
+    // 悬停底色：默认是悬浮菜单用的深色蒙层；面板里传 options.hoverBg 换成跟随主题的变量
+    // （硬编码 rgba(0,0,0,.05) 在深色设置面板上几乎看不见）。
+    item.addEventListener("mouseenter", () => { if (item.style.fontWeight !== "700") item.style.background = options.hoverBg ?? "rgba(0,0,0,.05)"; });
+    item.addEventListener("mouseleave", () => {
+      // 面板行传了 onLeave 就交给它（重算选中态），否则沿用悬浮菜单的 paint
+      if (typeof options.onLeave === "function") { options.onLeave(); return; }
+      paint(document.documentElement.dataset.anonbuddySkin ?? null);
+    });
     item.addEventListener("click", () => {
       if (item.__editor || Date.now() < renameGuardUntil) return;
       onPick(item);
@@ -296,12 +315,20 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   };
 
   // 同步切换 WorkBuddy 的 VS Code 主题模式，让原生控件（输入框/按钮等）跟着深浅色变
-  // 记录当前皮肤底色：浅色护栏的兜底纠正需要它来重算
+  // 记录当前皮肤底色：外观护栏的兜底纠正需要它来重算
   let activeSurface = null;
   // 皮肤是否正在接管外观。false = 用户选了「原生」/ 皮肤已卸下，
-  // 此时必须把 data-skin 撤掉、浅色锁解开，让 WorkBuddy 自带外观重新自理。
+  // 此时必须把 data-skin 撤掉、外观护栏解开，让 WorkBuddy 自带外观重新自理。
   // （声明必须早于 applyMode 的首次调用；真正的赋值在 setTheme / clearTheme / applyCustomTheme）
   let skinOwned = true;
+  // 「切到普通主题 / 选原生时要把 WE 视频收掉」的钩子。
+  // setTheme / applyCustomTheme / clearTheme 定义在 WE 区块之前，但都是运行时才调用，
+  // 所以这里前置声明成空函数，实现在 WE 区块里赋值（直接引用会撞 const 的 TDZ）。
+  let onLeaveWeTheme = () => {};
+  // 「主题变了就顺手刷新设置面板自身的配色」的钩子。
+  // 必须前置声明成空函数：applyMode 在初始化阶段就会被调用（此时 syncPaneThemeVars 还没定义，
+  // 直接引用会撞 const 的 TDZ）。真正的实现在 syncPaneThemeVars / ensureModalSurface 之后赋值。
+  let refreshPaneChrome = () => {};
   const applyMode = (surface) => {
     const dark = !isLightSurface(surface);
     activeSurface = surface;
@@ -315,12 +342,21 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     }
     const wantScheme = dark ? "dark" : "light";
     if (html.style.colorScheme !== wantScheme) html.style.colorScheme = wantScheme;
+    // ⚠️ 必须自己写 html[data-theme]（2026-09-20 修）
+    // 原生写它的那条路径是 ThemeManager.applyTheme，而那条路径**见到 data-skin 就提前 return**
+    // （见上方 data-skin 契约）。于是皮肤接管期间没人写它 —— 不写就会停在"接管前"的旧值，
+    // 靠 html[data-theme] 取色的那部分自带 UI 要等下一次 React 重渲染才刷新。
+    // 症状：在插件设置里切主题后自带外观深浅不对，点一下左下角个人中心才变正常。
+    if (html.getAttribute("data-theme") !== wantScheme) html.setAttribute("data-theme", wantScheme);
     syncModeClasses(body, dark);
     syncModeClasses(html, dark);
     // 换肤即换外观：把同一个深浅决定同步给 WorkBuddy 自带的外观系统
     // （applyMode 是所有主题切换路径的唯一汇合点，见 setTheme / applyCustomTheme / clearTheme）
     // skinOwned=false（用户选了「原生」）时不写 data-skin、不改持久化 —— 那时代管权已交还原生。
     if (skinOwned) syncAppearance(dark);
+    // 面板配色是"跟随弹窗底色"算出来的（不是跟随皮肤），弹窗底色会随主题变 → 必须重算。
+    // 初始化时这个钩子还是空函数（syncPaneThemeVars 尚未定义），赋值见下方。
+    refreshPaneChrome();
   };
 
   // ==================== 与 WorkBuddy 自带「外观（浅色/深色）」联动 ====================
@@ -439,17 +475,18 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       if (ctx && typeof ctx.overrideThemeForSkin === "function") ctx.overrideThemeForSkin(mode);
     } catch {}
 
-    // ④ 浅色主题护栏：皮肤是浅色时，把「外观=深色」这个状态本身消掉，并锁住入口
-    enforceLightGuard(!dark);
+    // ④ 外观护栏：锁住与皮肤深浅**相反**的那一侧
+    //    （浅色皮肤锁深色；深色皮肤锁浅色 —— 深底皮肤配浅色外观会露出原生浅色底，显示异常）
+    enforceAppearanceGuard(dark ? "light" : "dark");
   };
 
   // 交还外观控制权（用户选了「原生」，或皮肤被卸下）：
-  // 撤掉 data-skin 让原生 ThemeManager 恢复自理，解开浅色锁，
+  // 撤掉 data-skin 让原生 ThemeManager 恢复自理，解开外观护栏，
   // 并把 DOM 恢复到用户上次在原生外观面板里选的那个深浅。
   // 注意方向必须反着来：先解除皮肤接管，再让原生自己写，否则会被我们的类名盖住。
   const releaseAppearanceOwnership = () => {
     document.documentElement.removeAttribute("data-skin");
-    enforceLightGuard(false);
+    enforceAppearanceGuard(null);
     const scopedKey = readAccountScopedModeKey();
     let mode = "light";
     try {
@@ -471,28 +508,36 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     } catch {}
   };
 
-  // ---- 浅色主题下的「深色禁用」规则 ----
-  // 需求：当皮肤是浅色系时，禁止把外观切成深色。
+  // ---- 「外观禁用」护栏（极性化，2026-09-20 由单向改为双向）----
+  // 需求：**皮肤与外观必须同深浅**，禁止把外观切到与皮肤相反的那一侧。
+  //   · 浅色系皮肤 → 禁止切「深色」（原行为，保留）
+  //   · 深色系皮肤 → 禁止切「浅色」（本次新增：深底皮肤 + 浅色外观会露出原生浅色底，显示异常）
+  // 所以护栏不是"永远锁深色"，而是"锁住与皮肤相反的那一侧"：
+  //   lockedPolarity = 皮肤浅 ? "dark" : "light"；皮肤卸下（选「原生」）时为 null。
   // 做法分三层，缺一不可：
-  //   1) 视觉层：给「深色」按钮加禁用态（半透明 + not-allowed），并把当前态指回浅色
+  //   1) 视觉层：给「被锁的那一侧」按钮加禁用态（半透明 + not-allowed）
   //   2) 行为层：捕获阶段拦截 pointerdown/click，吞掉事件（原生按钮没有 disabled 概念，
   //      只能由我们拦；用捕获阶段才抢在 React 的委托监听之前）
-  //   3) 兜底层：万一被别处（快捷键 / 原生 setTheme）切成深色，观察 body 的
-  //      data-vscode-theme-kind 把它按回浅色 —— 但**只在浅色皮肤生效期间**，
+  //   3) 兜底层：万一被别处（快捷键 / 原生 setTheme）切成被锁的那一侧，观察 body 的
+  //      data-vscode-theme-kind 把它按回皮肤那一侧 —— 但**只在皮肤接管期间**，
   //      否则会在原生皮肤模式下误伤用户自己的选择。
-  const LIGHT_GUARD_ATTR = "data-wb-light-lock";
-  let guardActive = false;
+  const APPEARANCE_LOCK_ATTR = "data-wb-appearance-lock";
+  // 被锁住的那一侧："dark" | "light" | null（null = 不锁，交还原生）
+  let lockedPolarity = null;
 
   const themeOptionButtons = () => [...document.querySelectorAll(".user-menu-popover .user-menu-theme-option")];
+  // 选项文案判定：/浅色|Light/ 命中的就是「浅色」那一侧
+  const isLightOptionEl = (el) => /浅色|Light/i.test(el.textContent || "");
+  const isLockedOption = (isLightOption) =>
+    lockedPolarity !== null && (lockedPolarity === "light") === isLightOption;
 
-  const syncLightGuardUi = () => {
+  const syncAppearanceGuardUi = () => {
     const options = themeOptionButtons();
     if (!options.length) return;
     for (const el of options) {
-      const isDarkOption = !/浅色|Light/i.test(el.textContent || "");
-      if (!guardActive || !isDarkOption) {
-        if (el.dataset.wbLightLock === "1") {
-          el.removeAttribute("data-wb-light-lock");
+      if (!isLockedOption(isLightOptionEl(el))) {
+        if (el.dataset.wbLocked === "1") {
+          el.removeAttribute("data-wb-locked");
           el.style.removeProperty("opacity");
           el.style.removeProperty("cursor");
           el.style.removeProperty("pointer-events");
@@ -501,29 +546,32 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
         }
         continue;
       }
-      if (el.dataset.wbLightLock === "1") continue;
-      el.dataset.wbLightLock = "1";
+      if (el.dataset.wbLocked === "1") continue;
+      el.dataset.wbLocked = "1";
       // ⚠️ 不能只写 pointer-events:none —— 那样连捕获阶段的监听器也收不到事件；
       // 我们要的是「收得到但吞掉」，所以只做视觉禁用，拦截交给监听器。
       el.style.opacity = "0.4";
       el.style.cursor = "not-allowed";
       el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", "当前皮肤为浅色系，已禁用深色外观");
+      el.setAttribute("title", lockedPolarity === "dark"
+        ? "当前皮肤为浅色系，已禁用深色外观"
+        : "当前皮肤为深色系，已禁用浅色外观");
     }
   };
-  const enforceLightGuard = (on) => {
-    guardActive = Boolean(on);
-    if (guardActive) document.documentElement.setAttribute(LIGHT_GUARD_ATTR, "1");
-    else document.documentElement.removeAttribute(LIGHT_GUARD_ATTR);
-    syncLightGuardUi();
+  const enforceAppearanceGuard = (polarity) => {
+    lockedPolarity = polarity === "dark" || polarity === "light" ? polarity : null;
+    if (lockedPolarity) document.documentElement.setAttribute(APPEARANCE_LOCK_ATTR, lockedPolarity);
+    else document.documentElement.removeAttribute(APPEARANCE_LOCK_ATTR);
+    syncAppearanceGuardUi();
   };
 
-  // 捕获阶段吞掉对「深色」按钮的点击（原生按钮是 <button type=button>，没有 disabled）
+  // 捕获阶段吞掉对「被锁那一侧」按钮的点击（原生按钮是 <button type=button>，没有 disabled）
   const onGuardCapture = (event) => {
-    if (!guardActive) return;
+    if (!lockedPolarity) return;
     const target = event.target instanceof Element ? event.target.closest(".user-menu-theme-option") : null;
     if (!target) return;
-    if (/浅色|Light/i.test(target.textContent || "")) return;
+    // 点的不是被锁的那一侧 → 放行
+    if (!isLockedOption(isLightOptionEl(target))) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };
@@ -535,34 +583,49 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 所以再挂一个只盯 <body> 直接子节点增减的轻量观察器 —— 浮层出现时**立刻**刷一次。
   // （只 observe childList 不 observe subtree：portal 是 body 的直接子节点，
   //   这样不会把弹窗内部的频繁渲染也拉到回调里来。）
+  // 注意这里**不**按 lockedPolarity 提前 return：解锁后浮层再开时也要能把
+  // 可能残留的禁用态清掉，而 syncAppearanceGuardUi 本身在无锁时就是纯清理。
   const guardUiObserver = new MutationObserver(() => {
     if (stopped) return;
-    if (!guardActive) return;
-    if (document.querySelector(".user-menu-popover")) syncLightGuardUi();
+    if (!document.querySelector(".user-menu-popover")) return;
+    syncAppearanceGuardUi();
   });
   guardUiObserver.observe(document.body, { childList: true });
 
-  // 兜底：外观被别处切成深色时按回浅色（仅在浅色皮肤生效期间）
+  // 兜底：外观被别处切成「被锁那一侧」时按回皮肤那一侧（仅在皮肤接管期间）
   let guardWatchTimer = null;
   const startGuardWatch = () => {
     if (guardWatchTimer !== null) return;
     guardWatchTimer = setInterval(() => {
-      if (stopped || !guardActive) return;
-      if (document.body.getAttribute("data-vscode-theme-kind") === "vscode-dark") {
-        applyMode(activeSurface ?? "#ffffff");
+      if (stopped) return;
+      if (lockedPolarity && activeSurface !== null) {
+        const lockedKind = lockedPolarity === "dark" ? "vscode-dark" : "vscode-light";
+        if (document.body.getAttribute("data-vscode-theme-kind") === lockedKind) {
+          applyMode(activeSurface);
+        }
       }
-      syncLightGuardUi();
+      syncAppearanceGuardUi();
+      // 侧边栏被 React 重建时会丢掉内联的模糊变量 → 顺手补回（只在真的不一致时写，平时是空操作）
+      reapplySidebarBlur();
     }, 600);
   };
 
   // ---- 记住上次用的主题：重启后由 apply --theme last 自动恢复（自定义主题也能恢复）----
-  const LAST_KEY = "workbuddySkinLastTheme";
+  const LAST_KEY = "anonbuddySkinLastTheme";
   const NATIVE_MARK = "__native__";
   const readLastTheme = () => {
     try { return localStorage.getItem(LAST_KEY); } catch { return null; }
   };
   const writeLastTheme = (value) => {
     try { localStorage.setItem(LAST_KEY, value); } catch {}
+  };
+  // 开机默认主题：用户在右键菜单里显式指定的那个，优先级高于自动记录的 LAST_KEY。
+  const BOOT_KEY = "anonbuddySkinBootTheme";
+  const readBootTheme = () => {
+    try { return localStorage.getItem(BOOT_KEY); } catch (error) { return null; }
+  };
+  const writeBootTheme = (value) => {
+    try { localStorage.setItem(BOOT_KEY, value || ""); } catch (error) {}
   };
   // 存的主题可能已经被删掉（比如自定义主题被右键删除），这时要能判断出"已失效"
   const canApplyTheme = (id) => id !== NATIVE_MARK
@@ -574,19 +637,21 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     if (custom) { applyCustomTheme(custom); return; }
     const theme = data.themes.find((candidate) => candidate.id === id);
     if (!theme) return;
+    onLeaveWeTheme();
     skinOwned = true;
     style.textContent = theme.css;
-    document.documentElement.dataset.workbuddySkin = theme.id;
+    document.documentElement.dataset.anonbuddySkin = theme.id;
     applyMode(theme.surface);
     paint(theme.id);
     writeLastTheme(theme.id);
   };
   const clearTheme = () => {
     // 交还给 WorkBuddy 自带外观：撤掉 data-skin（让原生 ThemeManager 恢复自理）、
-    // 解开浅色锁，并把外观状态恢复成用户上次在原生面板里选的那个。
+    // 解开外观护栏，并把外观状态恢复成用户上次在原生面板里选的那个。
+    onLeaveWeTheme();
     skinOwned = false;
     style.textContent = "";
-    delete document.documentElement.dataset.workbuddySkin;
+    delete document.documentElement.dataset.anonbuddySkin;
     releaseAppearanceOwnership();
     applyMode("#ffffff");
     paint(null);
@@ -690,9 +755,10 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   };
 
   const applyCustomTheme = (theme) => {
+    onLeaveWeTheme();
     skinOwned = true;
     style.textContent = buildCustomCss(theme.dataUrl, theme.colors, theme.id);
-    document.documentElement.dataset.workbuddySkin = theme.id;
+    document.documentElement.dataset.anonbuddySkin = theme.id;
     applyMode(theme.colors.surface);
     paint(theme.id);
     writeLastTheme(theme.id);
@@ -721,7 +787,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     rows.delete(id);
     const key = aliasKeyOf(id);
     if (key in aliases) { delete aliases[key]; writeAliases(); }
-    if (document.documentElement.dataset.workbuddySkin === id) clearTheme();
+    if (document.documentElement.dataset.anonbuddySkin === id) clearTheme();
     return true;
   };
 
@@ -768,6 +834,186 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   const uploadRow = row("\\uff0b \\u81ea\\u5b9a\\u4e49\\u56fe\\u7247", "rgba(36,201,215,.9)", () => picker.click());
   uploadRow.style.borderTop = "1px solid rgba(0,0,0,.08)";
+
+  // ==================== Wallpaper Engine 壁纸（方案 A：file:// 直读）====================
+  // 可行性结论见 docs/WE-INTEGRATION.md。要点：
+  //   · 渲染进程本身就是 file:// 页面，可以直接 <video src="file:///..."> 播本机文件（已实测）
+  //     → 零字节拷贝、零存储、零 payload 膨胀，不碰 localStorage 配额
+  //   · 只传路径，绝不把媒体打进仓库（创意工坊内容版权归作者）
+  //   · ⚠️ 这些主题**只在本机有效**，不可分享（面板上必须标注）
+  const WE_THEME_KEY = "anonbuddySkinWeTheme";
+  const WE_PAUSED_KEY = "anonbuddySkinWePaused";
+  const WE_FALLBACK_COLORS = { accent: "#24c9d7", secondary: "#ef8fd3", surface: "#f7fbff", text: "#17344f" };
+  // 1×1 透明 GIF：视频条目没有预览图时给 CSS 占位（视频会盖在上面）
+  const WE_BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+  const weItems = Array.isArray(data.weItems) ? data.weItems : [];
+  const weThemeId = (item) => "we-" + item.id;
+  const readWeTheme = () => { try { return localStorage.getItem(WE_THEME_KEY) || null; } catch { return null; } };
+  const writeWeTheme = (id) => { try { localStorage.setItem(WE_THEME_KEY, id || ""); } catch {} };
+  const readWePaused = () => { try { return localStorage.getItem(WE_PAUSED_KEY) === "1"; } catch { return false; } };
+  const writeWePaused = (paused) => { try { localStorage.setItem(WE_PAUSED_KEY, paused ? "1" : "0"); } catch {} };
+
+  let wePaused = readWePaused();
+  let weActiveId = null;
+  let bgVideo = null;
+
+  // 声音与音量（对齐 dsh 皮肤中心）：默认静音  浏览器自动播放策略会拦住非静音首播，
+  // 所以先静音起播，用户打开声音开关时再解除（那时已经产生用户手势）。
+  const WE_SOUND_KEY = "anonbuddySkinWeSound";
+  const WE_VOLUME_KEY = "anonbuddySkinWeVolume";
+  const readFlag = (key, fallback) => { try { const raw = localStorage.getItem(key); return raw === null ? fallback : raw === "1"; } catch (error) { return fallback; } };
+  const writeFlag = (key, value) => { try { localStorage.setItem(key, value ? "1" : "0"); } catch (error) {} };
+  let weSound = readFlag(WE_SOUND_KEY, false);
+  let weVolume = (() => {
+    try {
+      const raw = localStorage.getItem(WE_VOLUME_KEY);
+      if (raw === null) return 35;
+      const num = Number(raw);
+      return Number.isFinite(num) && num >= 0 && num <= 100 ? num : 35;
+    } catch (error) { return 35; }
+  })();
+
+  const applyVolume = () => {
+    if (!bgVideo) return;
+    try {
+      bgVideo.volume = Math.min(1, Math.max(0, weVolume / 100));
+      bgVideo.muted = !weSound;
+    } catch (error) {}
+  };
+
+  const setWeSound = (value) => {
+    weSound = Boolean(value);
+    writeFlag(WE_SOUND_KEY, weSound);
+    applyVolume();
+    syncWeUi();
+  };
+
+  const setWeVolume = (value) => {
+    const next = Math.round(Number(value));
+    weVolume = Number.isFinite(next) ? Math.min(100, Math.max(0, next)) : weVolume;
+    try { localStorage.setItem(WE_VOLUME_KEY, String(weVolume)); } catch (error) {}
+    applyVolume();
+    syncWeUi();
+  };
+
+  // 从预览图取色（复用上传图片那条链路）。失败就退回默认色，不让主题因此不可用。
+  const paletteFromUrl = (url) => new Promise((resolve) => {
+    if (!url) { resolve(WE_FALLBACK_COLORS); return; }
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const sample = document.createElement("canvas");
+        sample.width = 48;
+        sample.height = Math.max(1, Math.round(48 * img.height / Math.max(1, img.width)));
+        sample.getContext("2d").drawImage(img, 0, 0, sample.width, sample.height);
+        resolve(extractPalette(sample));
+      } catch (error) { resolve(WE_FALLBACK_COLORS); }
+    };
+    img.onerror = () => resolve(WE_FALLBACK_COLORS);
+    img.src = url;
+  });
+
+  // 释放旧视频。必须 pause + 清 src + load()：只把节点摘掉，解码器可能还在跑（幂等红线）。
+  const releaseBgVideo = () => {
+    if (!bgVideo) return;
+    try { bgVideo.pause(); } catch (error) {}
+    try { bgVideo.removeAttribute("src"); bgVideo.load(); } catch (error) {}
+    try { bgVideo.remove(); } catch (error) {}
+    bgVideo = null;
+  };
+
+  const syncBgVideoPlayback = () => {
+    if (!bgVideo) return;
+    if (wePaused) { try { bgVideo.pause(); } catch (error) {} return; }
+    const playing = bgVideo.play();
+    if (playing && typeof playing.catch === "function") playing.catch(() => {});
+  };
+
+  // 把视频挂进背景图层。非视频条目（静态预览）只需清掉旧视频 —— 图走 CSS 的 hero 槽位。
+  const setBackgroundMedia = (item) => {
+    releaseBgVideo();
+    if (!bgLayer || !item || item.kind !== "video") return;
+    const video = document.createElement("video");
+    video.dataset.wbWeVideo = "1";
+    video.src = item.fileUrl;
+    video.loop = true;
+    video.autoplay = true;
+    video.muted = !weSound;
+    video.volume = Math.min(1, Math.max(0, weVolume / 100));
+    video.defaultMuted = !weSound;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.preload = "auto";
+    video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;";
+    bgLayer.appendChild(video);
+    bgVideo = video;
+    syncBgVideoPlayback();
+  };
+
+  const setWePaused = (paused) => {
+    wePaused = Boolean(paused);
+    writeWePaused(wePaused);
+    syncBgVideoPlayback();
+    syncWeButtons();
+  };
+
+  const applyWeTheme = async (item) => {
+    const id = weThemeId(item);
+    // hero 优先用 RePKG 解出来的原始贴图（通常 4K），没有才退回创意工坊缩略图（1K）
+    const heroSource = item.heroUrl || item.previewUrl || null;
+    const colors = await paletteFromUrl(heroSource);
+    const hero = heroSource || WE_BLANK;
+    skinOwned = true;
+    style.textContent = buildCustomCss(hero, colors, id);
+    document.documentElement.dataset.anonbuddySkin = id;
+    applyMode(colors.surface);
+    setBackgroundMedia(item);
+    weActiveId = item.id;
+    writeWeTheme(item.id);
+    paint(id);
+    writeLastTheme(id);
+    syncWeList();
+    syncWeButtons();
+    syncWeUi();
+  };
+
+
+  // 离开 WE 主题（切到普通主题 / 选原生）时必须收掉视频与状态，否则视频会在后台一直解码
+  const leaveWeTheme = () => {
+    releaseBgVideo();
+    if (weActiveId !== null) { weActiveId = null; writeWeTheme(null); }
+    syncWeList();
+    syncWeButtons();
+  };
+
+  // 悬浮小图标旁边的暂停/播放键：只在用视频壁纸时出现
+  const weToggleBtn = document.createElement("button");
+  weToggleBtn.type = "button";
+  weToggleBtn.dataset.wbWeToggle = "1";
+  weToggleBtn.style.cssText = "position:absolute;right:44px;top:50%;transform:translateY(-50%);display:none;" +
+    "width:30px;height:30px;border-radius:50%;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);" +
+    "box-shadow:0 3px 12px rgba(0,0,0,.24);cursor:pointer;line-height:1;padding:0;font-size:14px;";
+  weToggleBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setWePaused(!wePaused);
+  });
+
+  const syncWeButtons = () => {
+    const isVideoWe = weActiveId !== null && (weItems.find((x) => x.id === weActiveId)?.kind === "video");
+    weToggleBtn.style.display = isVideoWe ? "block" : "none";
+    weToggleBtn.textContent = wePaused ? "\\u25b6" : "\\u23f8";
+    weToggleBtn.title = wePaused ? "继续播放动态壁纸" : "暂停动态壁纸";
+    if (wePaneToggle) {
+      wePaneToggle.textContent = wePaused ? "继续播放" : "暂停播放";
+      wePaneToggle.dataset.wbPaused = wePaused ? "1" : "0";
+    }
+  };
+
+  let wePaneToggle = null;
+  let syncWeList = () => {};
+  let syncWeUi = () => {};
+  onLeaveWeTheme = leaveWeTheme;
 
   const NATIVE_LABEL = "\\u539f\\u751f\\u754c\\u9762";
   const native = row(displayName(null, NATIVE_LABEL), "rgba(0,0,0,.24)", () => { clearTheme(); panel.style.display = "none"; }, { id: null, renamable: true, defaultLabel: NATIVE_LABEL });
@@ -940,7 +1186,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       copyObserver.observe(root, { childList: true, subtree: true, characterData: true });
       (copyObserver.__roots ??= new Set()).add(root);
     }
-    if (window.__workbuddySkin?.copy) window.__workbuddySkin.copy.applied = (copyObserver.__roots?.size ?? 0);
+    if (window.__anonbuddySkin?.copy) window.__anonbuddySkin.copy.applied = (copyObserver.__roots?.size ?? 0);
   };
   watchRoots();
 
@@ -980,15 +1226,23 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     settingsPane = null;
     pluginEntryActive = false;
     // 外观联动：监听器与轮询必须一起收掉。否则旧实例的捕获监听器还挂在 document 上，
-    // 「浅色禁用深色」会叠加多份（虽然幂等，但 stopped 之后的行为不可预期），
+    // 「外观护栏」会叠加多份（虽然幂等，但 stopped 之后的行为不可预期），
     // 护栏轮询也会一直被旧实例继续跑。
     document.removeEventListener("pointerdown", onGuardCapture, true);
     document.removeEventListener("click", onGuardCapture, true);
     guardUiObserver.disconnect();
     if (guardWatchTimer !== null) { clearInterval(guardWatchTimer); guardWatchTimer = null; }
-    // 卸载时把「皮肤接管」的声明撤掉，并解除浅色锁，让原生外观恢复自理
-    enforceLightGuard(false);
+    // 卸载时把「皮肤接管」的声明撤掉，并解除外观护栏，让原生外观恢复自理
+    enforceAppearanceGuard(null);
     document.documentElement.removeAttribute("data-skin");
+    // 背景媒体层是我们插的节点，必须一起收掉（幂等红线：重复 apply 不能叠层）
+    try { bgLayer?.remove(); } catch {}
+    bgLayer = null;
+    // 侧边栏上的内联模糊也要清掉，否则 pause 后原生界面会留着我们的模糊
+    try { document.querySelector(SIDEBAR_SEL)?.style.removeProperty("backdrop-filter"); } catch {}
+    // WE 视频必须真释放（pause + 清 src + load()），否则旧实例的解码器会一直在后台跑
+    releaseBgVideo();
+    try { weToggleBtn.remove(); } catch {}
   };
 
   // 历史自定义主题全部还原成菜单行（按上传顺序，排在「＋ 自定义图片」上面）
@@ -1001,10 +1255,74 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   // 存的是「贴左边还是贴右边 + 距该边的距离」，不是绝对 x/y。
   // 绝对坐标在窗口缩小后会被夹到右边缘，之后再放大也回不到原位 ——
   // 这就是"窗口非最大化时插件图标位置偏移"的成因。
-  const POS_KEY = "workbuddySkinMenuPos";
+  const POS_KEY = "anonbuddySkinMenuPos";
   // 悬浮图标显隐开关：设置面板里的「显示悬浮小图标」控制；关掉后按钮隐藏，
   // 但菜单本身与皮肤照常工作（入口改从设置面板进）。
-  const ICON_HIDDEN_KEY = "workbuddySkinIconHidden";
+  // ---- 两个外观调节项：侧边栏毛玻璃 / 背景图模糊（2026-09-20）----
+  // 只改 html 上的 CSS 变量（内联样式），**不重建 <style>** —— 避免整张样式表重解析与重排。
+  // 滑块对外是 1..100 的整数，换算成 px 的系数写在这里；CSS 侧只认 *-px 变量。
+  // 默认值刻意与"没这功能之前"的观感一致：侧边栏 100（= 原来的 24px）、背景 1（≈0.3px，肉眼无感）。
+  const TUNABLES_KEY = "anonbuddySkinTunables";
+  const TUNABLE_SPEC = [
+    { key: "sidebarBlur", label: "侧边栏毛玻璃", varName: "--wb-sidebar-blur-px", factor: 0.24, def: 100 },
+    { key: "bgBlur", label: "背景图模糊", varName: "--wb-bg-blur-px", factor: 0.3, def: 1 },
+  ];
+  const clampTunable = (spec, value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return spec.def;
+    return Math.max(1, Math.min(100, Math.round(n)));
+  };
+  const readTunables = () => {
+    let stored = null;
+    try { stored = JSON.parse(localStorage.getItem(TUNABLES_KEY) ?? "null"); } catch {}
+    const out = {};
+    for (const spec of TUNABLE_SPEC) out[spec.key] = clampTunable(spec, stored?.[spec.key] ?? spec.def);
+    return out;
+  };
+  const tunables = readTunables();
+  const writeTunables = () => {
+    try { localStorage.setItem(TUNABLES_KEY, JSON.stringify(tunables)); return true; } catch { return false; }
+  };
+
+  // 背景媒体层的节点引用。真实节点在下方创建（那时才能 append 到 body），
+  // 这里先声明 —— applyTunables 在初始化阶段就会被调用，直接引用 const 会撞 TDZ。
+  let bgLayer = null;
+  // 侧边栏模糊的补涂钩子（React 重建侧边栏会丢掉内联值，由护栏轮询顺手补回）。
+  // 同样是前置声明，实现在 applySidebarBlur 之后赋值。
+  let reapplySidebarBlur = () => {};
+
+  // 背景媒体层的 id。CSS 侧硬编码同名选择器（与 #anonbuddy-skin-menu 的既有做法一致）。
+  const BG_LAYER_ID = "anonbuddy-skin-bg";
+  const SIDEBAR_SEL = "[data-view-id=sidebar]";
+
+  // ⚠️ 侧边栏的模糊**直接写 backdrop-filter 内联样式**，不要走自定义属性。
+  // 实测（本机 2269 个元素）：
+  //   · 在 html 上 style.setProperty 写自定义属性 → 全文档重算，23ms/次（拖动只有 ~40fps）
+  //   · 在侧边栏元素上写自定义属性 → 只重算它自己那 408 个后代，3.2ms/次
+  //   · 直接写 backdrop-filter 内联样式 → 0ms
+  // 三者视觉效果一样，所以选最便宜的那个。CSS 里保留 24px 作为脚本尚未接管时的兜底。
+  const applySidebarBlur = () => {
+    const el = document.querySelector(SIDEBAR_SEL);
+    if (!el) return;
+    const want = "blur(" + (tunables.sidebarBlur * 0.24).toFixed(2) + "px) saturate(1.15)";
+    if (el.style.backdropFilter !== want) el.style.backdropFilter = want;
+  };
+
+  const applyTunables = () => {
+    const blurPx = tunables.bgBlur * 0.3;
+    if (bgLayer) {
+      // 模糊≈0 时不挂 filter：blur(0px) 照样会建一层全屏合成层，白付显存。
+      const wantFilter = blurPx >= 0.5 ? "blur(" + blurPx.toFixed(2) + "px)" : "";
+      if (bgLayer.style.filter !== wantFilter) bgLayer.style.filter = wantFilter;
+      // 图层随模糊量反向外扩：blur() 会在视口边缘采样到透明区，不外扩就露白边。
+      const wantInset = blurPx >= 0.5 ? (-2 * blurPx).toFixed(2) + "px" : "0px";
+      if (bgLayer.style.inset !== wantInset) bgLayer.style.inset = wantInset;
+    }
+    applySidebarBlur();
+  };
+  reapplySidebarBlur = applySidebarBlur;
+
+  const ICON_HIDDEN_KEY = "anonbuddySkinIconHidden";
   const readIconHidden = () => {
     try { return localStorage.getItem(ICON_HIDDEN_KEY) === "1"; } catch { return false; }
   };
@@ -1122,26 +1440,51 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   // ctxMenu 用 position:fixed 挂在 root 下：root 没有 transform/filter，fixed 仍是相对视口定位，
   // 放在 root 里是为了让「重新注入」时随 root 一起被移除
-  root.append(button, panel, picker, ctxMenu);
+  root.append(button, weToggleBtn, panel, picker, ctxMenu);
   document.body.appendChild(root);
+
+  // ---- 背景媒体层（真实节点，不是 body::before）----
+  // 为什么不用伪元素：拖"背景图模糊"滑块时要实时改模糊量，而实测在 html 上
+  // style.setProperty 写自定义属性会触发全文档样式重算（23ms/次），拖动只有 ~40fps；
+  // 直接写这个节点的 style.filter / style.inset 则是 0ms。见 skin.css 里的同段说明。
+  // 先按 id 清掉可能残留的孤儿节点（旧实例异常中断时留下的），与 root 的写法一致。
+  document.getElementById(BG_LAYER_ID)?.remove();
+  bgLayer = document.createElement("div");
+  bgLayer.id = BG_LAYER_ID;
+  // 图层的内容（底色/遮罩/hero）全部由 skin.css 的 #anonbuddy-skin-bg 规则给，
+  // 这里只负责 append + 后面用内联样式驱动模糊。
+  document.body.appendChild(bgLayer);
 
   // 启动时应用哪个主题：
   //   restoreLast（apply --theme last）→ 用用户上次在菜单里选的那个，自定义主题也能恢复；
   //   还没记录过（例如刚升级到这一版）→ 沿用当前页面上已经生效的主题，避免升级后突然变脸；
   //   存的主题已失效（例如被删掉）→ 退回 CLI 指定的主题。
-  const currentSkin = document.documentElement.dataset.workbuddySkin ?? null;
-  const preferred = data.restoreLast ? (readLastTheme() ?? currentSkin) : null;
-  if (preferred === NATIVE_MARK) clearTheme();
+  const currentSkin = document.documentElement.dataset.anonbuddySkin ?? null;
+  // 开机默认主题（用户显式指定）优先于「上次选的主题」（自动记录），这是「开机默认」的语义；
+  // 两者都可能失效（主题被删 / WE 条目换机器后不存在），所以逐级回退，最后才用 CLI 指定的主题。
+  const bootRaw = data.restoreLast ? readBootTheme() : null;
+  const bootOk = typeof bootRaw === "string" && bootRaw !== "" && bootRaw.indexOf("we-") !== 0 && canApplyTheme(bootRaw);
+  const preferred = data.restoreLast ? ((bootOk ? bootRaw : null) ?? (readLastTheme() ?? currentSkin)) : null;
+  // WE 主题的 id 形如 we-<条目ID>，不在 data.themes / customThemes 里，要单独恢复
+  const preferredWe = typeof preferred === "string" && preferred.indexOf("we-") === 0
+    ? weItems.find((item) => weThemeId(item) === preferred)
+    : null;
+  if (preferredWe) applyWeTheme(preferredWe);
+  else if (preferred === NATIVE_MARK) clearTheme();
   else if (preferred !== null && canApplyTheme(preferred)) setTheme(preferred);
   else if (data.activeId === null) clearTheme();
   else setTheme(data.activeId);
 
-  // 浅色护栏的轮询与个人中心浮层的按钮同步：
-  //   ① 轮询兜底（600ms）负责"被别处切成深色时按回浅色"，并持续刷新按钮禁用态 ——
+  // 外观护栏的轮询与个人中心浮层的按钮同步：
+  //   ① 轮询兜底（600ms）负责"被别处切成与皮肤相反的那一侧时按回来"，并持续刷新按钮禁用态 ——
   //      个人中心浮层是 React portal，每次打开都是新节点，没有稳定的挂载时机可观察；
   //      用低压轮询比 MutationObserver 监听整个 body 便宜得多（浮层按需出现，不是热路径）；
   //   ② stopped 后回调变空操作（见 dispose）。
-  if (activeSurface !== null && isLightSurface(activeSurface)) enforceLightGuard(true);
+  // ⚠️ 必须带 skinOwned 判断：用户选「原生」时皮肤已卸下，这时再去锁原生外观
+  //    会让用户再也切不动它 —— 是联动最危险的副作用。
+  if (skinOwned && activeSurface !== null) {
+    enforceAppearanceGuard(isLightSurface(activeSurface) ? "dark" : "light");
+  }
   startGuardWatch();
 
   // ==================== 设置面板集成 ====================
@@ -1178,7 +1521,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     return "#f7f7f7";
   };
 
-  const currentThemeId = () => document.documentElement.dataset.workbuddySkin ?? null;
+  const currentThemeId = () => document.documentElement.dataset.anonbuddySkin ?? null;
 
   // 面板行：和悬浮菜单的 row 同源（复用 row()），只是容器不同、点击后不关面板
   const paneRow = (label, dotColor, onPick, options = {}) => row(label, dotColor, onPick, options);
@@ -1208,8 +1551,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     const listLabel = document.createElement("p");
     listLabel.textContent = "皮肤";
     listLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    // 皮肤列表：三列网格（2026-09-20 由单列改为网格）。
+    // 原先每行占满整宽、右侧大片留白，主题一多列表就拉得很长；改成 3 列后
+    // 9 个主题正好 3×3，列表高度约减半，横向空间也用满了。
+    // ⚠️ 用「gap + 每格独立边框」而不是「1px gap 借容器底色当分隔线」：
+    //    深色下 --wb-pane-card 是 rgba(255,255,255,.06) 半透明，
+    //    容器底色会透上来，hairline 分隔线那套会直接失效。
     const listCard = document.createElement("div");
-    listCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));overflow:hidden;background:var(--wb-pane-card,#fff);";
+    listCard.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:6px;border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);";
     listGroup.append(listLabel, listCard);
 
     // 原生界面行 + 全部内置主题 + 全部自定义主题
@@ -1218,10 +1567,19 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       listCard.textContent = "";
       paneRows.clear();
       const mk = (label, dotColor, onPick, options) => {
-        const item = paneRow(label, dotColor, onPick, { ...options, container: listCard });
-        item.style.padding = "10px 14px";
-        item.style.borderRadius = "0";
-        if (listCard.childElementCount > 1) item.style.borderTop = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
+        const item = paneRow(label, dotColor, onPick, {
+          ...options,
+          container: listCard,
+          hoverBg: "var(--wb-pane-hover,rgba(0,0,0,.04))",
+          // 离开时重算整列选中态：网格里每格是独立卡片，不能靠 paint() 擦掉悬停底
+          onLeave: () => syncPaneSelection(),
+        });
+        // 网格单元格：自带圆角与边框（不再是"整块卡片 + 行间分隔线"）
+        item.style.padding = "8px 10px";
+        item.style.borderRadius = "8px";
+        item.style.border = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
+        // 名字在窄格子里要能吃满剩余宽度，否则截断得太早
+        item.__text.style.maxWidth = "none";
         paneRows.set(options?.id ?? null, item);
         markRow(item, options?.id ?? null);
         return item;
@@ -1252,6 +1610,10 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
         const on = id === active;
         if (item.__check) item.__check.style.opacity = on ? "1" : "0";
         item.style.background = on ? "var(--wb-pane-active,rgba(36,201,215,.12))" : "transparent";
+        // 网格里每格是独立卡片，选中态再给一道强调色描边，比只靠一个 ✓ 更醒目
+        item.style.borderColor = on
+          ? "var(--wb-pane-accent,rgba(36,201,215,.6))"
+          : "var(--wb-pane-border,rgba(0,0,0,.06))";
       }
       // 悬浮菜单的选中态也同步一下
       paint(active);
@@ -1279,7 +1641,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     addHint.textContent = "PNG / JPG / WebP";
     addHint.style.cssText = "flex:none;font-size:12px;opacity:.5;";
     addRow.append(addPlus, addText, addHint);
-    addRow.addEventListener("mouseenter", () => { addRow.style.background = "rgba(0,0,0,.04)"; });
+    addRow.addEventListener("mouseenter", () => { addRow.style.background = "var(--wb-pane-hover,rgba(0,0,0,.04))"; });
     addRow.addEventListener("mouseleave", () => { addRow.style.background = "transparent"; });
     addRow.addEventListener("click", () => picker.click());
     addCard.appendChild(addRow);
@@ -1331,7 +1693,490 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     // 开关状态可能被别处改（例如测试重置），每次打开面板都重读一次
     pane.__syncSwitch = syncSwitch;
 
-    body.append(listGroup, addGroup, toggleGroup);
+    // ---- 分组 4：外观调节（两个 1..100 的滑块）----
+    const tuneGroup = document.createElement("div");
+    const tuneLabel = document.createElement("p");
+    tuneLabel.textContent = "外观调节";
+    tuneLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    const tuneCard = document.createElement("div");
+    tuneCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);";
+    const tuneSyncers = [];
+    const mkSlider = (spec) => {
+      const rowEl = document.createElement("div");
+      rowEl.style.cssText = "padding:12px 14px;";
+      const head = document.createElement("div");
+      head.style.cssText = "display:flex;align-items:center;gap:10px;margin-bottom:8px;";
+      const name = document.createElement("span");
+      name.textContent = spec.label;
+      name.style.cssText = "flex:1;min-width:0;";
+      const value = document.createElement("span");
+      value.style.cssText = "flex:none;font:500 12px/1 ui-monospace,monospace;opacity:.75;min-width:28px;text-align:right;";
+      head.append(name, value);
+
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = "1";
+      input.max = "100";
+      input.step = "1";
+      input.dataset.wbTunable = spec.key;
+      // 根节点是 user-select:none，滑块必须显式开回交互（与重命名输入框同理）
+      input.style.cssText = "width:100%;margin:0;accent-color:var(--wb-pane-accent,#24c9d7);cursor:pointer;user-select:none;";
+      input.setAttribute("aria-label", spec.label);
+
+      const sync = () => {
+        input.value = String(tunables[spec.key]);
+        value.textContent = String(tunables[spec.key]);
+      };
+      input.addEventListener("input", () => {
+        tunables[spec.key] = clampTunable(spec, input.value);
+        // ⚠️ 只跑渲染同步，**不更新数字标签**（见下面的性能说明）。
+        applyTunables();
+      });
+      // 松手才落盘 + 才刷新数字：拖动过程中每次 input 都写 localStorage 是没必要的同步 IO。
+      //
+      // ⚠️ 数字为什么不在拖动中实时更新（2026-09-20 实测）：
+      //    设置弹窗打开时，**任何**文本改动都会让文档布局变脏，而一次布局约 29ms
+      //    （弹窗内有 2700+ 元素）→ 拖动只剩 ~33fps，明显卡顿。
+      //    实测对照：改 textContent 后强制布局 = 29ms；同一元素只改 transform = 0ms；
+      //    把读数挪到弹窗之外也一样是 29ms（代价来自"弹窗开着时整篇布局都很贵"，不是位置问题）。
+      //    所以拖动路径刻意做成"零布局"：数字在松手时补上，拖动中的反馈交给
+      //    滑块自身的位置 + 背景模糊的实时变化（那两项都是 0ms）。
+      input.addEventListener("change", () => { writeTunables(); sync(); });
+      // 别让拖动事件冒泡出去（设置弹窗有"点空白处关闭"之类的外部点击逻辑）
+      ["click", "pointerdown", "mousedown"].forEach((type) => {
+        input.addEventListener(type, (event) => event.stopPropagation());
+      });
+
+      rowEl.append(head, input);
+      tuneSyncers.push(sync);
+      sync();
+      return rowEl;
+    };
+    TUNABLE_SPEC.forEach((spec, index) => {
+      const el = mkSlider(spec);
+      if (index > 0) el.style.borderTop = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
+      tuneCard.appendChild(el);
+    });
+    tuneGroup.append(tuneLabel, tuneCard);
+    // 值可能被别处改（测试/重置），每次打开面板都重读一次
+    pane.__syncTunables = () => {
+      for (const spec of TUNABLE_SPEC) tunables[spec.key] = clampTunable(spec, readTunables()[spec.key]);
+      applyTunables();
+      tuneSyncers.forEach((fn) => fn());
+    };
+
+    // ---- 分组 5：Wallpaper Engine 壁纸（本机）----
+    // 面板结构对齐 dsh 皮肤中心的壁纸库：声音/音量 -> 手动目录 -> 评级筛选 -> 分页 -> 卡片。
+    const weGroup = document.createElement("div");
+    const weLabel = document.createElement("p");
+    weLabel.textContent = "Wallpaper Engine 壁纸";
+    weLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+    const weCard = document.createElement("div");
+    weCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);overflow:hidden;";
+
+    // 「仅本机」标注：WE 主题引用的是本机绝对路径，换台机器就是死链；
+    // 创意工坊内容版权归作者，不可再分发。
+    const weNote = document.createElement("div");
+    weNote.textContent = "\\u26a0\\ufe0f 仅本机可用、不可分享";
+    weNote.title = "这些壁纸引用你电脑上的本地文件路径，换机器即失效；创意工坊内容版权归作者，请不要打包分发";
+    weNote.style.cssText = "padding:9px 12px;font:500 11px/1.5 system-ui;color:#c2761a;" +
+      "background:color-mix(in srgb, #f0a63a 14%, transparent);border-bottom:1px solid var(--wb-pane-border,rgba(0,0,0,.06));";
+
+    const mkWeBtn = (text, primary) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = text;
+      btn.style.cssText = "border-radius:8px;cursor:pointer;font:500 12px/1 system-ui;padding:7px 11px;" +
+        (primary
+          ? "border:1px solid var(--wb-pane-accent,#24c9d7);background:var(--wb-pane-accent,#24c9d7);color:#fff;"
+          : "border:1px solid var(--wb-pane-border,rgba(0,0,0,.14));background:transparent;color:inherit;");
+      return btn;
+    };
+    const mkWeHeadRow = (labelText) => {
+      const rowEl = document.createElement("div");
+      rowEl.style.cssText = "display:flex;align-items:center;gap:10px;";
+      const labelEl = document.createElement("span");
+      labelEl.textContent = labelText;
+      labelEl.style.cssText = "flex:none;font:400 12px/1.4 system-ui;opacity:.8;";
+      rowEl.appendChild(labelEl);
+      return rowEl;
+    };
+
+    // ---------- 声音 / 音量（对齐 dsh 的 skin-wallpaper.sound / volume）----------
+    const weHead = document.createElement("div");
+    weHead.style.cssText = "padding:10px 12px;display:flex;flex-direction:column;gap:10px;" +
+      "border-bottom:1px solid var(--wb-pane-border,rgba(0,0,0,.06));";
+
+    const soundRow = mkWeHeadRow("壁纸声音");
+    const soundToggle = document.createElement("button");
+    soundToggle.type = "button";
+    soundToggle.dataset.wbWeSound = "1";
+    soundToggle.setAttribute("role", "switch");
+    soundToggle.style.cssText = "flex:none;width:40px;height:22px;border-radius:11px;border:none;" +
+      "cursor:pointer;padding:0;position:relative;transition:background .15s;";
+    const soundKnob = document.createElement("span");
+    soundKnob.style.cssText = "position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;" +
+      "background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s;";
+    soundToggle.appendChild(soundKnob);
+    soundToggle.addEventListener("click", () => setWeSound(!weSound));
+    // 面板里的暂停键：只在用视频壁纸时才有意义，文案与显隐由 syncWeButtons 同步
+    wePaneToggle = mkWeBtn("暂停播放", false);
+    wePaneToggle.dataset.wbWePaneToggle = "1";
+    wePaneToggle.style.cssText += "margin-left:auto;padding:6px 10px;";
+    wePaneToggle.addEventListener("click", () => setWePaused(!wePaused));
+    soundRow.append(wePaneToggle, soundToggle);
+
+    const volumeRow = mkWeHeadRow("壁纸音量");
+    const volumeInput = document.createElement("input");
+    volumeInput.type = "range";
+    volumeInput.min = "0";
+    volumeInput.max = "100";
+    volumeInput.step = "1";
+    volumeInput.dataset.wbWeVolume = "1";
+    volumeInput.style.cssText = "flex:1;min-width:0;accent-color:var(--wb-pane-accent,#24c9d7);cursor:pointer;";
+    const volumeText = document.createElement("span");
+    volumeText.style.cssText = "flex:none;min-width:36px;text-align:right;font:400 12px/1.4 system-ui;opacity:.7;";
+    volumeInput.addEventListener("input", () => setWeVolume(volumeInput.value));
+    volumeRow.append(volumeInput, volumeText);
+    weHead.append(soundRow, volumeRow);
+
+    // ---------- 手动目录 ----------
+    // renderer 拿不到本地绝对路径，所以这一行用 <input webkitdirectory> 直接选目录：
+    // 选中的媒体文件立即灌进面板（视频走 Blob / file URL），不经过 Node 侧二次扫描。
+    const weDirWrap = document.createElement("div");
+    weDirWrap.style.cssText = "padding:10px 12px;display:flex;flex-direction:column;gap:8px;" +
+      "border-bottom:1px solid var(--wb-pane-border,rgba(0,0,0,.06));";
+    const dirRow = document.createElement("div");
+    dirRow.style.cssText = "display:flex;align-items:center;gap:8px;";
+    const dirLabel = document.createElement("span");
+    dirLabel.textContent = "手动目录";
+    dirLabel.style.cssText = "flex:none;font:400 12px/1.4 system-ui;opacity:.8;";
+    const dirInput = document.createElement("input");
+    dirInput.type = "text";
+    dirInput.readOnly = true;
+    dirInput.dataset.wbWeDirInput = "1";
+    dirInput.placeholder = "/path/to/wallpapers 或 ~/";
+    dirInput.style.cssText = "flex:1;min-width:0;border-radius:8px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.14));" +
+      "background:transparent;color:inherit;font:400 12px/1.4 system-ui;padding:6px 9px;";
+    const dirAddBtn = mkWeBtn("添加", true);
+    const dirBrowseBtn = mkWeBtn("浏览", false);
+    dirRow.append(dirLabel, dirInput, dirAddBtn, dirBrowseBtn);
+
+    const dirHint = document.createElement("div");
+    dirHint.dataset.wbWeDirHint = "1";
+    dirHint.style.cssText = "font:400 11px/1.5 system-ui;opacity:.6;";
+
+    const dirPicker = document.createElement("input");
+    dirPicker.type = "file";
+    dirPicker.webkitdirectory = true;
+    dirPicker.multiple = true;
+    dirPicker.style.display = "none";
+    const openDirPicker = () => dirPicker.click();
+    dirAddBtn.addEventListener("click", openDirPicker);
+    dirBrowseBtn.addEventListener("click", openDirPicker);
+    weDirWrap.append(dirRow, dirHint, dirPicker);
+
+    // ---------- 状态 ----------
+    const WE_FILTER_KEY = "anonbuddySkinWeFilter";
+    const WE_PIN_KEY = "anonbuddySkinWePinned";
+    const WE_PAGE_SIZE = 9;
+    let weFilter = (() => { try { const raw = localStorage.getItem(WE_FILTER_KEY); return ["all", "g", "pg13", "r18"].indexOf(raw) >= 0 ? raw : "all"; } catch (error) { return "all"; } })();
+    let wePage = 1;
+    let weLocalItems = [];
+    const readPins = () => { try { const raw = JSON.parse(localStorage.getItem(WE_PIN_KEY) || "[]"); return Array.isArray(raw) ? raw : []; } catch (error) { return []; } };
+    const writePins = (pins) => { try { localStorage.setItem(WE_PIN_KEY, JSON.stringify(pins)); } catch (error) {} };
+    let wePins = readPins();
+
+    // ---------- 评级筛选 + 页码 ----------
+    const weToolbar = document.createElement("div");
+    weToolbar.style.cssText = "display:flex;align-items:center;gap:8px;padding:10px 12px;flex-wrap:wrap;" +
+      "border-bottom:1px solid var(--wb-pane-border,rgba(0,0,0,.06));";
+    const RATING_TABS = [
+      { id: "all", label: "全部" },
+      { id: "g", label: "G" },
+      { id: "pg13", label: "PG-13" },
+      { id: "r18", label: "R18" },
+    ];
+    const ratingPills = new Map();
+    for (const tab of RATING_TABS) {
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.textContent = tab.label;
+      pill.dataset.wbWeRating = tab.id;
+      pill.style.cssText = "border-radius:999px;cursor:pointer;font:500 12px/1 system-ui;padding:6px 12px;";
+      pill.addEventListener("click", () => {
+        weFilter = tab.id;
+        wePage = 1;
+        try { localStorage.setItem(WE_FILTER_KEY, weFilter); } catch (error) {}
+        renderWeGrid();
+        syncWeUi();
+      });
+      ratingPills.set(tab.id, pill);
+      weToolbar.appendChild(pill);
+    }
+    const pageText = document.createElement("span");
+    pageText.dataset.wbWePageText = "1";
+    pageText.style.cssText = "margin-left:auto;font:400 12px/1.4 system-ui;opacity:.7;";
+    weToolbar.appendChild(pageText);
+
+    // ---------- 卡片网格 ----------
+    const weGrid = document.createElement("div");
+    weGrid.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px 12px;";
+    const weEmpty = document.createElement("div");
+    weEmpty.dataset.wbWeEmpty = "1";
+    weEmpty.style.cssText = "grid-column:1/-1;padding:22px 14px;text-align:center;font:400 12px/1.6 system-ui;opacity:.6;";
+
+    // ---------- 分页 ----------
+    const wePager = document.createElement("div");
+    wePager.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 12px 12px;";
+    const prevBtn = mkWeBtn("上一页", false);
+    const nextBtn = mkWeBtn("下一页", false);
+    const jumpInput = document.createElement("input");
+    jumpInput.type = "number";
+    jumpInput.min = "1";
+    jumpInput.dataset.wbWeJump = "1";
+    jumpInput.style.cssText = "width:58px;border-radius:8px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.14));" +
+      "background:transparent;color:inherit;font:400 12px/1.4 system-ui;padding:6px 8px;";
+    const jumpBtn = mkWeBtn("跳转", false);
+    wePager.append(prevBtn, nextBtn, jumpInput, jumpBtn);
+
+    // ---------- 数据 ----------
+    const ratingOf = (value) => (value === "pg13" || value === "r18" ? value : "g");
+    const allLocal = () => weLocalItems.concat(wePins);
+    const sourceItems = () => weItems.concat(allLocal());
+    const visibleItems = () => {
+      const list = sourceItems();
+      return weFilter === "all" ? list : list.filter((x) => ratingOf(x.rating) === weFilter);
+    };
+    const pageCount = () => Math.max(1, Math.ceil(visibleItems().length / WE_PAGE_SIZE));
+    const typeLabel = (item) => {
+      if (item.kind === "video") return "视频";
+      if (item.rawType === "scene") return "场景(静态)";
+      if (item.rawType === "web") return "网页";
+      return "静态图片";
+    };
+    const ratingLabel = (rating) => (rating === "r18" ? "R18" : rating === "pg13" ? "PG-13" : "G");
+    const ratingColor = (rating) => (rating === "r18" ? "#d14343" : rating === "pg13" ? "#d18b2b" : "#3f9e5a");
+
+    // ---------- 渲染 ----------
+    syncWeList = () => {
+      for (const cell of weGrid.querySelectorAll("[data-wb-we-item]")) {
+        const on = cell.dataset.wbWeItem === weActiveId;
+        cell.style.borderColor = on ? "var(--wb-pane-accent,rgba(36,201,215,.6))" : "var(--wb-pane-border,rgba(0,0,0,.06))";
+        cell.style.background = on ? "var(--wb-pane-active,rgba(36,201,215,.12))" : "transparent";
+        const applyBtn = cell.querySelector("[data-wb-we-apply]");
+        if (applyBtn) {
+          applyBtn.textContent = on ? "当前激活" : "应用";
+          applyBtn.disabled = on;
+          applyBtn.style.opacity = on ? ".6" : "1";
+          applyBtn.style.cursor = on ? "default" : "pointer";
+        }
+      }
+    };
+
+    const renderWeGrid = () => {
+      weGrid.textContent = "";
+      const list = visibleItems();
+      const total = pageCount();
+      if (wePage > total) wePage = total;
+      if (wePage < 1) wePage = 1;
+      const slice = list.slice((wePage - 1) * WE_PAGE_SIZE, (wePage - 1) * WE_PAGE_SIZE + WE_PAGE_SIZE);
+
+      for (const item of slice) {
+        const cell = document.createElement("div");
+        cell.dataset.wbWeItem = item.id;
+        cell.style.cssText = "display:flex;flex-direction:column;border-radius:10px;overflow:hidden;" +
+          "border:1px solid var(--wb-pane-border,rgba(0,0,0,.06));background:transparent;";
+
+        const thumbWrap = document.createElement("div");
+        thumbWrap.style.cssText = "position:relative;aspect-ratio:16/9;background:rgba(0,0,0,.08);overflow:hidden;";
+        if (item.previewUrl) {
+          const thumb = document.createElement("img");
+          thumb.src = item.previewUrl;
+          thumb.loading = "lazy";
+          thumb.alt = "";
+          thumb.style.cssText = "display:block;width:100%;height:100%;object-fit:cover;";
+          thumbWrap.appendChild(thumb);
+        }
+        const typeTag = document.createElement("span");
+        typeTag.textContent = typeLabel(item);
+        typeTag.style.cssText = "position:absolute;top:6px;left:6px;border-radius:6px;padding:2px 6px;" +
+          "background:rgba(0,0,0,.55);color:#fff;font:500 10px/1.4 system-ui;";
+        thumbWrap.appendChild(typeTag);
+        const rating = ratingOf(item.rating);
+        const rateTag = document.createElement("span");
+        rateTag.textContent = ratingLabel(rating);
+        rateTag.style.cssText = "position:absolute;top:6px;right:6px;border-radius:6px;padding:2px 6px;" +
+          "color:#fff;font:600 10px/1.4 system-ui;background:" + ratingColor(rating) + ";";
+        thumbWrap.appendChild(rateTag);
+        cell.appendChild(thumbWrap);
+
+        const cardBody = document.createElement("div");
+        cardBody.style.cssText = "padding:7px 8px 8px;display:flex;flex-direction:column;gap:7px;flex:1;";
+        const nameEl = document.createElement("div");
+        nameEl.textContent = item.title;
+        nameEl.title = item.title + (item.sizeMB ? "（" + item.sizeMB + " MB）" : "");
+        nameEl.style.cssText = "font:400 11px/1.35 system-ui;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+
+        const btnRow = document.createElement("div");
+        btnRow.style.cssText = "display:flex;gap:6px;margin-top:auto;";
+        const applyBtn = mkWeBtn("应用", true);
+        applyBtn.dataset.wbWeApply = "1";
+        applyBtn.style.cssText += "flex:1;padding:6px 8px;";
+        applyBtn.addEventListener("click", () => { applyWeTheme(item); });
+        btnRow.appendChild(applyBtn);
+
+        if (item.manual || item.pinned) {
+          const sideBtn = mkWeBtn(item.pinned ? "移除" : "导入", false);
+          sideBtn.style.cssText += "flex:none;padding:6px 8px;";
+          sideBtn.addEventListener("click", () => {
+            if (item.pinned) {
+              wePins = wePins.filter((x) => x.id !== item.id);
+              writePins(wePins);
+            } else {
+              // 「导入」= 把这条手动条目固定下来：写进 localStorage，重新 apply 后仍然显示。
+              // 只有拿到真实 file:// 路径的条目才固定得住（Blob URL 出不了这次会话）。
+              if (!/^file:/i.test(item.fileUrl || "")) {
+                sideBtn.textContent = "本会话有效";
+                setTimeout(() => { sideBtn.textContent = "导入"; }, 1400);
+                return;
+              }
+              const pin = {
+                id: item.id, title: item.title, kind: item.kind, rawType: item.rawType,
+                fileUrl: item.fileUrl, previewUrl: item.previewUrl, sizeMB: item.sizeMB,
+                rating: item.rating, manual: true, pinned: true,
+              };
+              wePins = wePins.filter((x) => x.id !== item.id).concat(pin);
+              writePins(wePins);
+              weLocalItems = weLocalItems.filter((x) => x.id !== item.id);
+            }
+            renderWeGrid();
+            syncWeUi();
+          });
+          btnRow.appendChild(sideBtn);
+        }
+
+        cardBody.append(nameEl, btnRow);
+        cell.appendChild(cardBody);
+        weGrid.appendChild(cell);
+      }
+
+      if (!slice.length) {
+        weEmpty.textContent = sourceItems().length === 0
+          ? "未发现壁纸。可先在 Wallpaper Engine 创意工坊订阅，或在上面的手动目录里添加文件夹。"
+          : "该评级下没有壁纸，换个筛选看看。";
+        weGrid.appendChild(weEmpty);
+      }
+      syncWeList();
+    };
+
+    syncWeUi = () => {
+      soundToggle.style.background = weSound ? "var(--wb-pane-accent,#24c9d7)" : "rgba(120,120,120,.35)";
+      soundKnob.style.transform = weSound ? "translateX(18px)" : "translateX(0)";
+      soundToggle.setAttribute("aria-checked", weSound ? "true" : "false");
+      if (volumeInput.value !== String(weVolume)) volumeInput.value = String(weVolume);
+      volumeText.textContent = weVolume + "%";
+
+      for (const [id, pill] of ratingPills) {
+        const on = id === weFilter;
+        pill.style.background = on ? "var(--wb-pane-accent,#24c9d7)" : "transparent";
+        pill.style.color = on ? "#fff" : "inherit";
+        pill.style.border = on ? "1px solid transparent" : "1px solid var(--wb-pane-border,rgba(0,0,0,.14))";
+      }
+
+      const total = pageCount();
+      pageText.textContent = "第 " + wePage + " / " + total + " 页";
+      jumpInput.max = String(total);
+      prevBtn.disabled = wePage <= 1;
+      nextBtn.disabled = wePage >= total;
+      prevBtn.style.opacity = wePage <= 1 ? ".45" : "1";
+      nextBtn.style.opacity = wePage >= total ? ".45" : "1";
+
+      const localCount = weLocalItems.length + wePins.length;
+      dirInput.value = localCount ? localCount + " 个条目" : "";
+      dirHint.textContent = localCount
+        ? "已加入 " + localCount + " 个条目（仅本机）。点卡片上的「导入」可把带真实路径的条目固定下来。"
+        : "还没有手动目录。没有 Wallpaper Engine（或想用零散素材）？把任意 .mp4/.webm 视频或项目文件夹加进来，就是你的壁纸库。";
+    };
+
+    prevBtn.addEventListener("click", () => { if (wePage > 1) { wePage -= 1; renderWeGrid(); syncWeUi(); } });
+    nextBtn.addEventListener("click", () => { if (wePage < pageCount()) { wePage += 1; renderWeGrid(); syncWeUi(); } });
+    jumpBtn.addEventListener("click", () => {
+      const want = Math.round(Number(jumpInput.value));
+      if (!Number.isFinite(want)) return;
+      wePage = Math.min(pageCount(), Math.max(1, want));
+      renderWeGrid();
+      syncWeUi();
+    });
+
+    const ratingFromTitle = (title) => {
+      if (/(^|[^\\w])(r-?18|nsfw|18\\+)([^\\w]|$)/i.test(title)) return "r18";
+      if (/(^|[^\\w])(pg-?13|r-?16)([^\\w]|$)/i.test(title)) return "pg13";
+      return "g";
+    };
+    const toFileUrlLocal = (rawPath) => {
+      const norm = String(rawPath).replace(/\\\\/g, "/").replace(/^\\/+/, "");
+      const parts = norm.split("/");
+      return "file:///" + parts.map((seg, index) => (index === 0 ? seg : encodeURIComponent(seg))).join("/");
+    };
+    // Electron 能给出真实绝对路径时优先用它（可持久），拿不到才退回 Blob URL（仅本次会话有效）
+    const localUrlOf = (file) => {
+      try {
+        const wu = window.webUtils;
+        if (wu && typeof wu.getPathForFile === "function") {
+          const real = wu.getPathForFile(file);
+          if (real) return toFileUrlLocal(real);
+        }
+      } catch (error) {}
+      try {
+        if (typeof file.path === "string" && file.path) return toFileUrlLocal(file.path);
+      } catch (error) {}
+      try { return URL.createObjectURL(file); } catch (error) { return null; }
+    };
+
+    dirPicker.addEventListener("change", () => {
+      const files = Array.from(dirPicker.files || []);
+      dirPicker.value = "";
+      if (!files.length) return;
+      const picked = [];
+      for (const file of files) {
+        const name = file.name;
+        const dot = name.lastIndexOf(".");
+        if (dot <= 0) continue;
+        const ext = name.slice(dot).toLowerCase();
+        const isVideo = ext === ".mp4" || ext === ".webm";
+        const isImage = ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp";
+        if (!isVideo && !isImage) continue;
+        const url = localUrlOf(file);
+        if (!url) continue;
+        const title = name.slice(0, dot);
+        picked.push({
+          id: "local-" + (file.webkitRelativePath || name),
+          title,
+          kind: isVideo ? "video" : "preview",
+          rawType: isVideo ? "video" : "image",
+          fileUrl: url,
+          previewUrl: isVideo ? null : url,
+          sizeMB: Math.round((file.size / 1048576) * 10) / 10,
+          rating: ratingFromTitle(title),
+          manual: true,
+        });
+      }
+      if (!picked.length) return;
+      const known = new Set(weLocalItems.map((x) => x.id));
+      for (const item of picked) if (!known.has(item.id)) { known.add(item.id); weLocalItems.push(item); }
+      wePage = 1;
+      renderWeGrid();
+      syncWeUi();
+    });
+
+    weCard.append(weNote, weHead, weDirWrap, weToolbar, weGrid, wePager);
+    weGroup.append(weLabel, weCard);
+    renderWeGrid();
+    syncWeUi();
+    syncWeButtons();
+
+    body.append(listGroup, addGroup, toggleGroup, tuneGroup, weGroup);
     pane.append(body);
     pane.__renderList = renderList;
     pane.__syncSelection = syncPaneSelection;
@@ -1340,7 +2185,12 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   // 主题变量：让面板颜色跟随「设置弹窗自己的底色」（不是皮肤主题，见 paneSurface 注释）
   const syncPaneThemeVars = () => {
-    if (!settingsPane) return;
+    if (!settingsPane || !settingsPane.isConnected) return;
+    // ⚠️ 这里**始终重算、但只在值真的变了才写**（2026-09-20 踩过两次）：
+    // applyMode 每次切主题都会走到这里，而往面板元素上写自定义属性会让它**整棵子树**样式失效
+    // （设置弹窗 2700+ 元素）—— 无脑写会把「重复应用同一主题」从 ~0ms 抬到 53.8ms。
+    // 但也不能"面板没显示就跳过"：那样面板关闭期间切主题，强调色会停在旧值（被
+    // test-settings-panel 的「原生模式下强调色兜底」抓住）。所以是"算而不写"。
     const surface = paneSurface();
     const dark = !isLightSurface(surface);
     // 强调色可以沿用当前皮肤，它只是点缀，深浅背景下都够醒目。
@@ -1350,14 +2200,21 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     const id = currentThemeId();
     const custom = customThemes.find((c) => c.id === id);
     const accent = custom?.colors.accent ?? data.themes.find((t) => t.id === id)?.accent ?? data.defaultAccent;
-    settingsPane.style.setProperty("--wb-pane-accent", accent);
-    settingsPane.style.setProperty("--wb-pane-text", dark ? "#f0f2f6" : "#1a1a1a");
-    settingsPane.style.setProperty("--wb-pane-card", dark ? "rgba(255,255,255,.06)" : "#ffffff");
-    settingsPane.style.setProperty("--wb-pane-border", dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)");
-    settingsPane.style.setProperty("--wb-pane-active", dark ? "rgba(255,255,255,.10)" : "rgba(36,201,215,.12)");
+    // 每个值都先比对再写：值没变时 setProperty 照样会触发样式失效，纯属白付钱
+    const setVar = (name, value) => {
+      if (settingsPane.style.getPropertyValue(name) !== value) settingsPane.style.setProperty(name, value);
+    };
+    setVar("--wb-pane-accent", accent);
+    setVar("--wb-pane-text", dark ? "#f0f2f6" : "#1a1a1a");
+    setVar("--wb-pane-card", dark ? "rgba(255,255,255,.06)" : "#ffffff");
+    setVar("--wb-pane-border", dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.08)");
+    setVar("--wb-pane-active", dark ? "rgba(255,255,255,.10)" : "rgba(36,201,215,.12)");
+    // 悬停底色：深色面板上不能再用 rgba(0,0,0,...) 那套（黑压黑等于没有反馈）
+    setVar("--wb-pane-hover", dark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.04)");
+    setVar("--wb-pane-surface", surface);
     // 卡片底色由变量给，这里兜一个显式值，避免变量在极端情况下没生效就变透明
-    settingsPane.style.color = dark ? "#f0f2f6" : "#1a1a1a";
-    settingsPane.style.setProperty("--wb-pane-surface", surface);
+    const wantColor = dark ? "#f0f2f6" : "#1a1a1a";
+    if (settingsPane.style.color !== wantColor) settingsPane.style.color = wantColor;
   };
 
   // ---- 设置界面可读性兜底（2026-09-19）----
@@ -1400,6 +2257,26 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     return true;
   };
 
+  // 主题切换后刷新面板自身的配色（由 applyMode 调用）。
+  // 为什么需要它：面板的 --wb-pane-* 变量是按「弹窗自身底色」算的，而弹窗底色会随主题变。
+  // 原来只在 openPluginPane() 里算一次 → 面板开着时切主题，面板配色会停在打开那一刻的值
+  // （深色弹窗配浅色变量 = 浅字压白底，面板看着像空的）。
+  // ⚠️ 本段在模板字符串里，注释里不能出现反引号，变量名一律不加反引号包裹。
+  refreshPaneChrome = () => {
+    if (!settingsPane || !settingsPane.isConnected) return;
+    // 如果我们之前给弹窗铺过实底，必须先撤掉再重算：
+    // 否则 ensureModalSurface 读到的"不透明底色"其实是我们自己写的，会被误判成
+    // "原生自己有实底"从而把覆盖撤掉，来回抖动。
+    const modal = document.querySelector(data.settingsOverlaySelector);
+    const content = modal?.querySelector(".settings-modal__content");
+    if (content?.dataset.wbPaneSurface === "1") {
+      content.style.removeProperty("background-color");
+      delete content.dataset.wbPaneSurface;
+      ensureModalSurface();
+    }
+    syncPaneThemeVars();
+  };
+
   // 点我们的导航条目：显示自己的面板、藏掉原生面板
   const openPluginPane = () => {
     const modal = document.querySelector(data.settingsOverlaySelector);
@@ -1413,6 +2290,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     ensureModalSurface();
     syncPaneThemeVars();
     settingsPane.__syncSwitch();
+    settingsPane.__syncTunables();
     settingsPane.style.display = "flex";
     content.querySelectorAll(":scope > .settings-modal__header, :scope > .settings-modal__panel").forEach((el) => {
       el.style.display = "none";
@@ -1519,6 +2397,8 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
 
   // 悬浮图标的显隐：启动时按存档还原
   applyIconVisibility();
+  // 两个外观调节项：启动时按存档还原（只写 CSS 变量，不碰 <style>）
+  applyTunables();
 
   // 供脚本化调用与测试：
   //   importFromDataUrl(dataUrl, name)  新增一个自定义主题
@@ -1538,7 +2418,7 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     }
     return next || null;
   };
-  window.__workbuddySkin = {
+  window.__anonbuddySkin = {
     importFromDataUrl,
     setTheme,
     clearTheme,
@@ -1589,6 +2469,75 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
       },
       visible: () => button.style.display !== "none",
       key: ICON_HIDDEN_KEY,
+    },
+    // Wallpaper Engine 壁纸（本机、file:// 直读）—— 供测试与脚本化调用
+    we: {
+      // ⚠️ 别在这里裁剪字段：面板内部用的是原始 weItems（带 heroUrl/canExtract），
+      //    这里漏字段会让测试断言看不到它们（踩过：误判成 payload 没传）。
+      items: () => weItems.map((x) => ({ ...x })),
+      active: () => weActiveId,
+      paused: () => wePaused,
+      setPaused: (paused) => { setWePaused(paused); return wePaused; },
+      apply: (id) => {
+        const item = weItems.find((x) => x.id === id);
+        if (!item) return null;
+        applyWeTheme(item);
+        return weThemeId(item);
+      },
+      themeKey: WE_THEME_KEY,
+      pausedKey: WE_PAUSED_KEY,
+      /** 背景图层里的视频节点（没有则为 null） */
+      videoEl: () => document.querySelector("#" + BG_LAYER_ID + " > video[data-wb-we-video]"),
+      videoState: () => {
+        const v = document.querySelector("#" + BG_LAYER_ID + " > video[data-wb-we-video]");
+        if (!v) return null;
+        return {
+          src: v.getAttribute("src"), paused: v.paused, loop: v.loop,
+          muted: v.muted, autoplay: v.autoplay, playsInline: v.playsInline,
+          readyState: v.readyState, videoWidth: v.videoWidth, videoHeight: v.videoHeight,
+        };
+      },
+      /** 悬浮小图标旁的暂停键（测试断言它的显隐与文案） */
+      toggleBtn: () => document.querySelector("button[data-wb-we-toggle]"),
+    },
+    // 两个外观调节项（侧边栏毛玻璃 / 背景图模糊）—— 供测试与脚本化调用
+    tunables: {
+      key: TUNABLES_KEY,
+      /** 当前值（1..100） */
+      get: () => ({ ...tunables }),
+      /** 规格：min/max/默认值/换算系数/CSS 变量名 */
+      spec: () => TUNABLE_SPEC.map(({ key, label, varName, factor, def }) => ({ key, label, varName, factor, def })),
+      /** 设置某一项（会自动 clamp 到 1..100 并落盘） */
+      set: (key, value) => {
+        const spec = TUNABLE_SPEC.find((s) => s.key === key);
+        if (!spec) return null;
+        tunables[key] = clampTunable(spec, value);
+        applyTunables();
+        writeTunables();
+        settingsPane?.__syncTunables?.();
+        return tunables[key];
+      },
+      /**
+       * 读回**实际生效**的渲染状态（诊断与断言用）。
+       * ⚠️ 两个值都不在 html 上：背景模糊是背景图层的内联 style.filter，
+       * 侧边栏模糊是侧边栏元素自身的内联变量 —— 这是为了避开
+       * "在 html 上改自定义属性会触发全文档重算"那个性能坑。
+       */
+      cssVars: () => {
+        const layer = document.getElementById(BG_LAYER_ID);
+        const sidebar = document.querySelector(SIDEBAR_SEL);
+        return {
+          layerPresent: Boolean(layer),
+          bgFilter: layer?.style.filter || "none",
+          bgInset: layer?.style.inset || "0px",
+          sidebarVar: sidebar?.style.backdropFilter || "",
+          sidebarBackdrop: sidebar ? getComputedStyle(sidebar).backdropFilter : null,
+        };
+      },
+      /** 背景图层节点（测试用来断言节点存在与收尾清理） */
+      layerId: BG_LAYER_ID,
+      /** 只跑渲染同步（不写 localStorage）—— 用于量"拖动中"的真实代价 */
+      apply: () => { applyTunables(); return true; },
     },
     // 文案替换（侧边栏应用名 / 欢迎页主标题）+ 主标题逐字拆分 —— 供测试与脚本化调用
     copy: {
@@ -1647,8 +2596,15 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     appearance: {
       /** 当前外观是深色还是浅色（由皮肤底色决定，不读原生状态） */
       mode: () => (activeSurface !== null && !isLightSurface(activeSurface) ? "dark" : "light"),
-      /** 浅色皮肤是否正在锁住「深色」外观 */
-      locked: () => guardActive,
+      /** 当前被锁住的那一侧："dark" | "light" | null（null = 未锁，交还原生） */
+      locked: () => lockedPolarity,
+      /**
+       * 解除外观护栏（**仅供测试隔离使用**）。
+       * 用途：验证「data-skin 原生契约」时必须让护栏闭嘴 —— 否则皮肤接管期间
+       * 任何把外观改到相反侧的尝试都会被兜底轮询纠正，测不出"原生有没有抢写类名"。
+       * 下一次 applyMode（切主题 / 换肤）会自动重新上锁。
+       */
+      releaseLock: () => { enforceAppearanceGuard(null); return true; },
       /** 皮肤是否已声明接管原生外观（写进 <html data-skin>） */
       owns: () => document.documentElement.getAttribute("data-skin") === "wb-skin-studio",
       /** 账号维度外观偏好 key（可能是 null：还没登录 / 没跑过外观面板） */
@@ -1669,6 +2625,9 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     aliases: () => ({ ...aliases }),
     customThemes: () => customThemes.map(({ id, name }) => ({ id, name })),
     lastTheme: () => readLastTheme(),
+    // 开机默认主题：读 / 写（传 null 或空串即清除） 供测试与脚本化调用
+    bootTheme: () => readBootTheme(),
+    setBootTheme: (id) => { writeBootTheme(id); return readBootTheme(); },
   };
   return true;
 })()`;

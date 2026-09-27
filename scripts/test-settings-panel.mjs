@@ -6,7 +6,7 @@
 
 import { createHarness } from "./_harness.mjs";
 
-const MENU_ID = "workbuddy-skin-menu";
+const MENU_ID = "anonbuddy-skin-menu";
 const t = await createHarness({ name: "test-settings-panel" });
 const { session, sleep, waitFor, check } = t;
 
@@ -58,12 +58,12 @@ const closeSettings = async () => {
 
 // 先确保皮肤在装（脚本 API 才存在）
 await t.applyLast();
-await waitFor(async () => Boolean(await evaluate(`window.__workbuddySkin?.settings`)), { waitMs: 10000, stepMs: 200 });
+await waitFor(async () => Boolean(await evaluate(`window.__anonbuddySkin?.settings`)), { waitMs: 10000, stepMs: 200 });
 
 const initial = await evaluate(`(() => {
-  const sk = window.__workbuddySkin;
+  const sk = window.__anonbuddySkin;
   return {
-    theme: document.documentElement.dataset.workbuddySkin ?? null,
+    theme: document.documentElement.dataset.anonbuddySkin ?? null,
     last: sk.lastTheme(),
     customIds: sk.customThemes().map((c) => c.id),
     aliases: sk.aliases(),
@@ -82,7 +82,7 @@ try {
   check("设置面板已打开", opened === true);
   const entry = await waitFor(
     () => evaluate(`(() => {
-      const sk = window.__workbuddySkin;
+      const sk = window.__anonbuddySkin;
       sk.settings.ensure();
       const el = sk.settings.entry();
       return el && el.textContent.trim() ? { text: el.textContent.trim(), cls: el.className } : null;
@@ -95,7 +95,7 @@ try {
 
   // 条目挂在「功能」分组下
   const inFeatureGroup = await evaluate(`(() => {
-    const el = document.getElementById(window.__workbuddySkin.settings.entryId);
+    const el = document.getElementById(window.__anonbuddySkin.settings.entryId);
     const group = el?.closest(".settings-navigation__group");
     return group ? (group.querySelector(".settings-navigation__group-title")?.textContent || "").trim() : null;
   })()`);
@@ -103,7 +103,7 @@ try {
 
   // ---- 2. 条目可重复 ensure，不会插出第二份 ----
   const dupCount = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.settings.ensure(); sk.settings.ensure(); sk.settings.ensure();
     return document.querySelectorAll("#" + sk.settings.entryId).length;
   })()`);
@@ -111,7 +111,7 @@ try {
 
   // 面板同理：不能叠出第二层
   const dupPane = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.settings.open(); sk.settings.open();
     return {
       panes: document.querySelectorAll("#" + sk.settings.paneId).length,
@@ -124,7 +124,7 @@ try {
 
   // ---- 3. 点条目打开插件面板 ----
   const panelOpened = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const ok = sk.settings.open();
     const pane = sk.settings.pane();
     return { ok, open: sk.settings.isOpen(), visible: pane ? getComputedStyle(pane).display : null, rows: sk.settings.rows().length };
@@ -149,7 +149,7 @@ try {
 
   // ---- 4. 皮肤列表内容：原生界面 + 全部磁盘主题 + 全部自定义主题 ----
   const listInfo = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const rows = sk.settings.rows();
     const customIds = sk.customThemes().map((c) => c.id);
     return {
@@ -162,11 +162,58 @@ try {
   check("列表含「原生界面」", listInfo.hasNative === true);
   check("列表含全部自定义皮肤", listInfo.customIds.every((id) => listInfo.rowIds.includes(id)), JSON.stringify({ custom: listInfo.customIds, rows: listInfo.rowIds }));
 
+  // ---- 4b. 皮肤列表是三列网格（2026-09-20：由单列改为紧凑网格）----
+  // 原先每行占满整宽、右侧大片留白；改成 3 列后 9 个主题正好 3×3。
+  // 这里把"容器是 grid / 3 列 / 每格独立圆角与边框"钉住，避免以后被顺手改回单列。
+  const gridLayout = await evaluate(`(() => {
+    const pane = window.__anonbuddySkin.settings.pane();
+    const card = pane?.querySelector('[data-wb-theme-id]')?.parentElement ?? null;
+    if (!card) return null;
+    const cs = getComputedStyle(card);
+    const cells = [...card.children];
+    const fcs = cells[0] ? getComputedStyle(cells[0]) : null;
+    // 同一行的单元格 offsetTop 相同 → 据此数出"每行几个"
+    const tops = cells.map((el) => el.offsetTop);
+    return {
+      display: cs.display,
+      columns: cs.gridTemplateColumns.trim().split(/\\s+/).length,
+      gap: cs.rowGap,
+      padding: cs.paddingTop,
+      cells: cells.length,
+      perRow: tops.filter((v) => v === tops[0]).length,
+      cellRadius: fcs?.borderTopLeftRadius ?? null,
+      cellBorderWidth: fcs?.borderTopWidth ?? null,
+      hoverVar: getComputedStyle(pane).getPropertyValue("--wb-pane-hover").trim(),
+    };
+  })()`);
+  check("皮肤列表容器是 grid 布局", gridLayout?.display === "grid", JSON.stringify(gridLayout));
+  check("皮肤列表固定 3 列", gridLayout?.columns === 3, `columns=${gridLayout?.columns}`);
+  check(
+    "每行排 3 个主题",
+    gridLayout?.perRow === 3 && gridLayout?.cells === listInfo.rowIds.length,
+    `perRow=${gridLayout?.perRow} cells=${gridLayout?.cells} rows=${listInfo.rowIds.length}`,
+  );
+  check(
+    "每个主题是独立圆角卡片（不再是整块列表 + 行间分隔线）",
+    gridLayout?.cellRadius === "8px" && gridLayout?.cellBorderWidth === "1px",
+    `radius=${gridLayout?.cellRadius} border=${gridLayout?.cellBorderWidth}`,
+  );
+  check(
+    "格子之间有间距（不再靠 borderTop 分隔线）",
+    gridLayout?.gap === "6px",
+    `gap=${gridLayout?.gap}`,
+  );
+  check(
+    "悬停底色跟随面板主题变量（深色面板下不再是黑压黑）",
+    gridLayout?.hoverVar !== "",
+    `--wb-pane-hover=${gridLayout?.hoverVar}`,
+  );
+
   // ---- 5. 高亮当前皮肤 ----
   const selected = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const on = sk.settings.rows().filter((r) => r.selected);
-    return { count: on.length, id: on[0]?.id ?? null, theme: document.documentElement.dataset.workbuddySkin ?? null };
+    return { count: on.length, id: on[0]?.id ?? null, theme: document.documentElement.dataset.anonbuddySkin ?? null };
   })()`);
   check("恰好一个条目处于选中态", selected.count === 1, JSON.stringify(selected));
   check("选中的就是当前皮肤", selected.id === selected.theme, JSON.stringify(selected));
@@ -174,11 +221,11 @@ try {
   // ---- 6. 在面板里点另一个皮肤 → 真的切换 ----
   const target = listInfo.rowIds.find((id) => id !== null && id !== selected.theme) ?? initial.customIds[0];
   const switched = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const ok = sk.settings.clickRow(${JSON.stringify(target)});
     return {
       ok,
-      theme: document.documentElement.dataset.workbuddySkin ?? null,
+      theme: document.documentElement.dataset.anonbuddySkin ?? null,
       last: sk.lastTheme(),
       selected: sk.settings.rows().filter((r) => r.selected).map((r) => r.id),
     };
@@ -187,17 +234,69 @@ try {
   check("切换后选中标记跟着走", switched.selected.length === 1 && switched.selected[0] === target, JSON.stringify(switched.selected));
   check("切换写入 lastTheme（重启可恢复）", switched.last === target, String(switched.last));
 
+  // ---- 6b. 面板里切主题后，面板自身配色 + 自带外观必须**立刻**跟着刷新 ----
+  // 回归两个真实 bug（2026-09-20，主人报「切主题后自带外观深浅不及时刷新，点一下个人中心才好」）：
+  //   ① applyMode 漏写 <html data-theme> —— 原生写它的那条路径见到 data-skin 会提前 return，
+  //      于是皮肤接管期间没人写它，停在接管前的旧值，靠它取色的自带 UI 要等 React 重渲染才更新。
+  //   ② 面板的 --wb-pane-* 只在 openPluginPane() 里算一次 —— 面板开着时切主题，
+  //      配色会停在打开那一刻（深色弹窗配浅色变量 = 浅字压白底，面板看着像空的）。
+  // 两条都要求"点完就生效，不需要额外交互"，所以这里点完只等轮询周期，不做任何其他操作。
+  const lightId = listInfo.rowIds.find((id) => id === "aisu") ?? null;
+  const darkId = listInfo.rowIds.find((id) => id === "wuthering-echo") ?? null;
+  if (lightId && darkId) {
+    const probe = () => evaluate(`(() => {
+      const h = document.documentElement;
+      const pane = window.__anonbuddySkin.settings.pane();
+      const cs = getComputedStyle(pane);
+      const dark = /vscode-dark/.test(document.body.className);
+      return {
+        dark,
+        themeAttr: h.getAttribute("data-theme"),
+        paneCard: cs.getPropertyValue("--wb-pane-card").trim(),
+        paneText: cs.getPropertyValue("--wb-pane-text").trim(),
+        paneHover: cs.getPropertyValue("--wb-pane-hover").trim(),
+      };
+    })()`);
+    const clickAndWait = async (id) => {
+      await evaluate(`window.__anonbuddySkin.settings.clickRow(${JSON.stringify(id)})`);
+      await sleep(900); // 只等我们自己的同步（不点任何别的东西）
+      return probe();
+    };
+
+    const inDark = await clickAndWait(darkId);
+    check("深色主题下 html[data-theme] 立刻变成 dark", inDark.themeAttr === "dark" && inDark.dark === true, JSON.stringify(inDark));
+
+    const inLight = await clickAndWait(lightId);
+    check("切浅色主题后 html[data-theme] 立刻变成 light（不需要再点一次）", inLight.themeAttr === "light" && inLight.dark === false, JSON.stringify(inLight));
+    check(
+      "切主题后面板配色立刻跟着刷新（不是停在打开那一刻）",
+      inDark.paneText !== inLight.paneText && inDark.paneCard !== inLight.paneCard && inDark.paneHover !== inLight.paneHover,
+      `dark=${JSON.stringify({ c: inDark.paneCard, t: inDark.paneText })} light=${JSON.stringify({ c: inLight.paneCard, t: inLight.paneText })}`,
+    );
+    check(
+      "面板配色与弹窗深浅一致（深色弹窗不能用浅色变量）",
+      inDark.paneText === "#f0f2f6" && inLight.paneText === "#1a1a1a",
+      `dark=${inDark.paneText} light=${inLight.paneText}`,
+    );
+
+    // 反向再切一次：确认两个方向都即时刷新，而不是"只在某个方向碰巧对"
+    const backToDark = await clickAndWait(darkId);
+    check("反向切回深色同样即时刷新", backToDark.themeAttr === "dark" && backToDark.paneText === "#f0f2f6", JSON.stringify(backToDark));
+  } else {
+    check("内置深浅主题齐全（6b 用例前提）", false, `light=${lightId} dark=${darkId}`);
+  }
+
   // ---- 7. 面板里点「原生界面」→ 还原 ----
   const toNative = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.settings.clickRow(null);
-    return { theme: document.documentElement.dataset.workbuddySkin ?? null, last: sk.lastTheme() };
+    return { theme: document.documentElement.dataset.anonbuddySkin ?? null, last: sk.lastTheme() };
   })()`);
   check("面板可切回原生界面", toNative.theme === null, JSON.stringify(toNative));
 
   // ---- 8. 上传新图片作为皮肤 ----
   const added = await evaluate(`(async () => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const before = sk.customThemes().length;
     const canvas = document.createElement("canvas");
     canvas.width = 64; canvas.height = 48;
@@ -217,15 +316,15 @@ try {
 
   // 新皮肤可以被选中
   const picked = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const ok = sk.settings.clickRow(${JSON.stringify(tempId)});
-    return { ok, theme: document.documentElement.dataset.workbuddySkin ?? null };
+    return { ok, theme: document.documentElement.dataset.anonbuddySkin ?? null };
   })()`);
   check("上传的新皮肤可在面板内选中", picked.theme === tempId, JSON.stringify(picked));
 
   // ---- 9. 悬浮图标开关 ----
   const hidden = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     const before = { visible: sk.icon.visible(), hidden: sk.icon.isHidden() };
     sk.icon.setHidden(true);
     return {
@@ -241,7 +340,7 @@ try {
   check("开关 aria 状态同步为 false", hidden.aria === "false", String(hidden.aria));
 
   const shown = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.icon.setHidden(false);
     return { visible: sk.icon.visible(), hidden: sk.icon.isHidden(), stored: localStorage.getItem(sk.icon.key) };
   })()`);
@@ -250,7 +349,7 @@ try {
 
   // 通过面板里的真开关按钮点击（而不是 API）也要生效
   const clickedSwitch = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.icon.setHidden(false);
     const b = sk.settings.pane()?.querySelector('[role=switch]');
     if (!b) return { err: "no switch" };
@@ -264,7 +363,7 @@ try {
 
   // ---- 10. 切到别的设置页 → 插件面板自动收起，原生面板回来 ----
   const restoreNative = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.settings.open();
     const nav = document.querySelector(".settings-navigation");
     const other = [...nav.querySelectorAll(".settings-navigation__item")].find((el) => el.id !== sk.settings.entryId);
@@ -294,10 +393,10 @@ try {
   // 这组断言同时钉住「不再抛异常」与「面板真的打开了」。
   const themeBeforeNative = await t.currentThemeId();
   const nativeMode = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     sk.clearTheme();                       // 等价于点「原生」
     sk.settings.close();
-    const skinId = document.documentElement.dataset.workbuddySkin ?? null;
+    const skinId = document.documentElement.dataset.anonbuddySkin ?? null;
     let err = null;
     let opened = null;
     try {
@@ -333,14 +432,14 @@ try {
   // 还原：回到进入本节之前的主题，供后面的收尾逻辑继续用
   await evaluate(`(() => {
     const id = ${JSON.stringify(themeBeforeNative)};
-    if (id) window.__workbuddySkin.setTheme(id);
+    if (id) window.__anonbuddySkin.setTheme(id);
     return true;
   })()`);
   await sleep(300);
 } finally {
   // ---- 收尾：删掉测试皮肤、还原图标开关与激活主题，并确保设置面板关掉 ----
   await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     if (${JSON.stringify(tempId)} !== null) sk.deleteCustomTheme(${JSON.stringify(tempId)});
     sk.icon.setHidden(${JSON.stringify(initial.iconHidden)});
     sk.setTheme(${JSON.stringify(initial.theme)});
@@ -352,11 +451,11 @@ try {
   check("收尾：设置面板已关闭（不留给后续测试）", modalClosed === true, String(modalClosed));
 
   const final = await evaluate(`(() => {
-    const sk = window.__workbuddySkin;
+    const sk = window.__anonbuddySkin;
     return {
       customIds: sk.customThemes().map((c) => c.id),
       aliases: sk.aliases(),
-      theme: document.documentElement.dataset.workbuddySkin ?? null,
+      theme: document.documentElement.dataset.anonbuddySkin ?? null,
       iconHidden: sk.icon.isHidden(),
       iconVisible: sk.icon.visible(),
     };

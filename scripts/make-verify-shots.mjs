@@ -3,7 +3,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { fetchRendererTargets, CdpSession } from "../src/cdp-client.mjs";
 
 const PORT = Number(process.argv[2] || 9333);
-const OUT = "D:/workbuddy-skin-studio/outputs/verify-20260912";
+const OUT = "D:/anonbuddy-skin/outputs/verify-20260912";
 mkdirSync(OUT, { recursive: true });
 
 const targets = await fetchRendererTargets(PORT);

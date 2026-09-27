@@ -64,7 +64,7 @@ const ALLOWED = new Set(["id", "accent", "secondary", "surface", "text", "hero",
   const known = new Set(["media", "keyframes", "supports", "font-face", "layer", "property", "container", "import", "charset"]);
   const typos = [...new Set(atRules)].filter((a) => !known.has(a));
   check("无拼错的 at-rule", typos.length === 0, typos.join("、"));
-  check("含逐字打字动画关键帧", src.includes("@keyframes workbuddy-skin-char-type-in"));
+  check("含逐字打字动画关键帧", src.includes("@keyframes anonbuddy-skin-char-type-in"));
 }
 
 // ---- 5. 关键不变量（踩过坑才加的，删掉会静默回归）----

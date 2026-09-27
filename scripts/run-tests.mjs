@@ -60,9 +60,11 @@ const SUITES = {
       { file: "test-tab-active.mjs", why: "改了左侧导航选中态上色" },
       { file: "test-hover.mjs", why: "改了悬停态规则" },
       { file: "test-settings-panel.mjs", why: "改了设置面板集成 / 悬浮图标开关 / 面板皮肤列表" },
+      { file: "test-tunables.mjs", why: "改了侧边栏毛玻璃 / 背景图模糊两个调节项，或动了背景图层结构" },
+      { file: "test-we.mjs", why: "改了 Wallpaper Engine 壁纸集成 / 背景图层的视频播放与暂停" },
       { file: "test-theme-switch-perf.mjs", why: "改了 applyMode / 深浅色类切换 / 设置界面配色与对比度" },
       { file: "test-popover-contrast.mjs", why: "改了浮层（个人中心菜单/下拉/右键菜单）底色或文字色" },
-      { file: "test-appearance-linkage.mjs", why: "改了外观联动 / applyMode / data-skin 契约 / 浅色禁用深色规则" },
+      { file: "test-appearance-linkage.mjs", why: "改了外观联动 / applyMode / data-skin 契约 / 双向外观护栏规则" },
     ],
   },
   menu: {

@@ -11,7 +11,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 展开面板 + 对「自定义主题行」发起重命名（名字最长，最像真实使用场景）
 const info = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   panel.style.display = "block";
   const el = [...panel.children].find((n) => n.__themeId === "custom-upload") ?? [...panel.children].find((n) => n.__themeId);
   el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
@@ -25,7 +25,7 @@ console.log("STATE=" + JSON.stringify(info));
 await sleep(250);
 
 const rect = await session.evaluate(`(() => {
-  const root = document.getElementById("workbuddy-skin-menu");
+  const root = document.getElementById("anonbuddy-skin-menu");
   const boxes = [root.getBoundingClientRect(), ...["button", ":scope > div"].map((sel) => root.querySelector(sel)?.getBoundingClientRect()).filter(Boolean)];
   // 面板是 absolute 定位，不在 root 的盒模型里，必须取并集
   const x = Math.min(...boxes.map((b) => b.x)), y = Math.min(...boxes.map((b) => b.y));
@@ -42,12 +42,12 @@ console.log(`WROTE ${OUT}  clip=${JSON.stringify(rect)}`);
 
 // 收尾：显式撤销演示别名（不能只靠 Esc —— 面板隐藏会触发 blur，而 blur 是「保存」）
 const cleanup = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const input = panel.querySelector("input[type=text]");
   if (input) input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  window.__workbuddySkin.renameTheme(${JSON.stringify(process.env.DEMO_THEME_ID || "custom-upload")}, "");
+  window.__anonbuddySkin.renameTheme(${JSON.stringify(process.env.DEMO_THEME_ID || "custom-upload")}, "");
   panel.style.display = "none";
-  return { aliases: window.__workbuddySkin.aliases(), stored: localStorage.getItem("workbuddySkinAliases") };
+  return { aliases: window.__anonbuddySkin.aliases(), stored: localStorage.getItem("anonbuddySkinAliases") };
 })()`);
 console.log("CLEANUP=" + JSON.stringify(cleanup));
 session.close();

@@ -3,11 +3,11 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { fetchRendererTargets, CdpSession } from "../src/cdp-client.mjs";
 const PORT = Number(process.argv[2] || 9333);
 const THEME = process.argv[3] || "miku-light";
-const OUT = "D:/workbuddy-skin-studio/outputs/verify-20260912";
+const OUT = "D:/anonbuddy-skin/outputs/verify-20260912";
 const targets = await fetchRendererTargets(PORT);
 const s = new CdpSession(targets[0].webSocketDebuggerUrl);
 await s.open();
-await s.evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(THEME)})`);
+await s.evaluate(`window.__anonbuddySkin.setTheme(${JSON.stringify(THEME)})`);
 await new Promise((r) => setTimeout(r, 800));
 mkdirSync(OUT, { recursive: true });
 const shot = await s.send("Page.captureScreenshot", {

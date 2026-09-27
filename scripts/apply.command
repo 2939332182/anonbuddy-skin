@@ -1,5 +1,5 @@
 #!/bin/bash
-# WorkBuddy Skin Studio — 以 CDP 调试模式重启 WorkBuddy 并应用当前主题
+# AnonBuddy Skin — 以 CDP 调试模式重启 WorkBuddy 并应用当前主题
 set -e
 cd "$(dirname "$0")/.."
 
@@ -28,7 +28,7 @@ pkill -f "/Applications/WorkBuddy.app/Contents/MacOS/Electron" 2>/dev/null || tr
 sleep 2
 
 echo "以 CDP 调试模式重启（端口 $PORT）..."
-nohup "$APP/Contents/MacOS/Electron" --remote-debugging-port="$PORT" > /tmp/workbuddy-skin-cdp.log 2>&1 &
+nohup "$APP/Contents/MacOS/Electron" --remote-debugging-port="$PORT" > /tmp/anonbuddy-skin-cdp.log 2>&1 &
 disown
 
 echo "等待 CDP 就绪..."

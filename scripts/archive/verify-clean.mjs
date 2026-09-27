@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 const QDIR = `${OUT}/_quarantine`;
 
 function dirSize(d, n = 0) {

@@ -10,8 +10,8 @@ const r = await session.evaluate(`(() => {
     title: h1?.textContent ?? null,
     h1HTML: h1?.outerHTML?.slice(0, 300) ?? null,
     brand: document.querySelector(".logo-workbuddy-title")?.textContent ?? null,
-    hasStyle: Boolean(document.getElementById("workbuddy-skin-style")),
-    theme: document.documentElement.dataset.workbuddySkin ?? null,
+    hasStyle: Boolean(document.getElementById("anonbuddy-skin-style")),
+    theme: document.documentElement.dataset.anonbuddySkin ?? null,
   };
 })()`);
 console.log(JSON.stringify(r, null, 2));

@@ -15,12 +15,12 @@ const OVERRIDE_ID = "workbuddy-desktop-layout-overrides";
 const initial = await evaluate(`(() => {
   const root = document.getElementById("root");
   const label = document.querySelector("[data-view-id=sidebar] .conversation-section-label");
-  const btn = document.getElementById("workbuddy-skin-menu").getBoundingClientRect();
+  const btn = document.getElementById("anonbuddy-skin-menu").getBoundingClientRect();
   return {
     viewport: [innerWidth, innerHeight],
     rootMarginTop: getComputedStyle(root).marginTop,
     labelBg: label ? getComputedStyle(label).backgroundColor : null,
-    storedPos: localStorage.getItem("workbuddySkinMenuPos"),
+    storedPos: localStorage.getItem("anonbuddySkinMenuPos"),
     btnRightGap: Math.round(innerWidth - btn.right),
     overrideExists: !!document.getElementById(${JSON.stringify(OVERRIDE_ID)}),
   };
@@ -75,7 +75,7 @@ try {
   // 都会让这条断言假报失败。收尾时会一并还原。
   if (!hadStoredPos) {
     await evaluate(`(() => {
-      const btn = document.querySelector("#workbuddy-skin-menu button");
+      const btn = document.querySelector("#anonbuddy-skin-menu button");
       const r = btn.getBoundingClientRect();
       const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
       const opts = { bubbles: true, clientX: cx, clientY: cy, button: 0, pointerId: 1 };
@@ -87,8 +87,8 @@ try {
     })()`);
     await sleep(300);
   }
-  const storedPos = await evaluate(`localStorage.getItem("workbuddySkinMenuPos")`);
-  const anchorGap = await evaluate(`(() => { const b = document.getElementById("workbuddy-skin-menu").getBoundingClientRect(); return Math.round(innerWidth - b.right); })()`);
+  const storedPos = await evaluate(`localStorage.getItem("anonbuddySkinMenuPos")`);
+  const anchorGap = await evaluate(`(() => { const b = document.getElementById("anonbuddy-skin-menu").getBoundingClientRect(); return Math.round(innerWidth - b.right); })()`);
   let parsed = null;
   try { parsed = JSON.parse(storedPos ?? "null"); } catch {}
   t.check("图标坐标已迁移成贴边锚点格式", parsed !== null && Number.isFinite(parsed.dx) && (parsed.ax === "left" || parsed.ax === "right"), storedPos);
@@ -99,7 +99,7 @@ try {
   for (const [w, h] of [[1920, 1040], [1000, 700]]) {
     await session.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false });
     await sleep(400);
-    const gap = await evaluate(`(() => { const b = document.getElementById("workbuddy-skin-menu").getBoundingClientRect(); return Math.round(innerWidth - b.right); })()`);
+    const gap = await evaluate(`(() => { const b = document.getElementById("anonbuddy-skin-menu").getBoundingClientRect(); return Math.round(innerWidth - b.right); })()`);
     t.check(`模拟 ${w}×${h} 时贴边距离不变（锚点生效）`, gap === refGap, `${gap} vs ${refGap}`);
   }
 } finally {
@@ -109,13 +109,13 @@ try {
     if (el) el.disabled = false;
     const scroller = document.querySelector("[data-view-id=sidebar] .conversation-list-content");
     if (scroller) scroller.scrollTop = 170;
-    ${hadStoredPos ? "" : `try { localStorage.removeItem("workbuddySkinMenuPos"); } catch {}
-    window.__workbuddySkin?.resetPosition?.();`}
+    ${hadStoredPos ? "" : `try { localStorage.removeItem("anonbuddySkinMenuPos"); } catch {}
+    window.__anonbuddySkin?.resetPosition?.();`}
     return true;
   })()`);
   await sleep(300);
   const final = await evaluate(`(() => {
-    const b = document.getElementById("workbuddy-skin-menu").getBoundingClientRect();
+    const b = document.getElementById("anonbuddy-skin-menu").getBoundingClientRect();
     return {
       viewport: [innerWidth, innerHeight],
       rootMarginTop: getComputedStyle(document.getElementById("root")).marginTop,

@@ -6,7 +6,7 @@ import { fetchRendererTargets, CdpSession } from "../src/cdp-client.mjs";
 
 const PORT = Number(process.argv[2] || 9333);
 const OUT = process.argv[3] || "outputs/verify-home/home.png";
-const MENU_ID = "workbuddy-skin-menu";
+const MENU_ID = "anonbuddy-skin-menu";
 
 const session = new CdpSession((await fetchRendererTargets(PORT))[0].webSocketDebuggerUrl);
 await session.open();
@@ -28,8 +28,8 @@ const info = await session.evaluate(`(() => {
   return {
     onWelcome: !!route,
     routeBg: route ? getComputedStyle(route).backgroundColor : null,
-    dataset: document.documentElement.dataset.workbuddySkin ?? null,
-    styleLen: (document.getElementById("workbuddy-skin-style")?.textContent || "").length,
+    dataset: document.documentElement.dataset.anonbuddySkin ?? null,
+    styleLen: (document.getElementById("anonbuddy-skin-style")?.textContent || "").length,
   };
 })()`);
 console.log("STATE=" + JSON.stringify(info));

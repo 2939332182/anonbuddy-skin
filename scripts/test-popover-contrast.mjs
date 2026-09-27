@@ -125,7 +125,7 @@ await t.applyLast();
 await evaluate(`(() => { [...document.querySelectorAll("[data-view-id=sidebar] button")].find((b) => (b.textContent || "").trim().endsWith("新建任务"))?.click(); return true; })()`);
 await sleep(1200);
 
-const hasApi = await evaluate(`Boolean(window.__workbuddySkin)`);
+const hasApi = await evaluate(`Boolean(window.__anonbuddySkin)`);
 check("注入脚本 API 存在（皮肤已装载）", hasApi === true, String(hasApi));
 
 const dataThemeIds = await t.loadMenuThemes().then((tms) => tms.map((m) => m.manifest.id));
@@ -151,7 +151,7 @@ if (customIds.length === 0) {
     );
   }
   if (await evaluate(`Boolean(document.querySelector(".settings-modal-overlay"))`)) {
-    await evaluate(`document.getElementById("workbuddy-skin-menu-settings-entry")?.click()`);
+    await evaluate(`document.getElementById("anonbuddy-skin-menu-settings-entry")?.click()`);
     await sleep(600);
     customIds = await readCustomIds();
   }
@@ -193,8 +193,8 @@ const results = [];
 
 for (const id of allThemeIds) {
   const applied = await evaluate(`(() => {
-    window.__workbuddySkin.setTheme(${JSON.stringify(id)});
-    return document.documentElement.dataset.workbuddySkin;
+    window.__anonbuddySkin.setTheme(${JSON.stringify(id)});
+    return document.documentElement.dataset.anonbuddySkin;
   })()`);
   await sleep(500);
 
@@ -252,7 +252,7 @@ const finalPopoverClosed = await closeMenu();
 check("收尾：个人中心菜单已关闭", finalPopoverClosed === true, String(finalPopoverClosed));
 
 if (initialTheme) {
-  await evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(initialTheme)})`);
+  await evaluate(`window.__anonbuddySkin.setTheme(${JSON.stringify(initialTheme)})`);
   await sleep(400);
 }
 const restored = await t.currentThemeId();

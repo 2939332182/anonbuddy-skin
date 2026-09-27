@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "chunzhi-day",
+  "name": "春至双背景 · 昼",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#dd9fa6",
+    "secondary": "#dca6b8",
+    "surface": "#fdf8f9",
+    "text": "#322425"
+  }
+}

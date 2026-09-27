@@ -68,7 +68,7 @@ const block = [
   '# 说明: 本机 IPv6 无公网路由，固定实测最优 IPv4 节点',
   '# 关键: codeload / api 有各自独立 IP，不可与 github.com 混用',
   '# 更新: 2026-09-11',
-  '# 还原: D:\\workbuddy-skin-studio\\cleanup-audit\\hosts-backup\\',
+  '# 还原: D:\\anonbuddy-skin\\cleanup-audit\\hosts-backup\\',
   '',
   '# --- raw 单文件域（实测 185.199.109.133 平均 109ms）---',
   '185.199.109.133		raw.githubusercontent.com',

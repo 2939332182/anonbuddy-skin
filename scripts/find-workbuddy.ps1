@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  WorkBuddy Skin Studio - locate WorkBuddy.exe and node.
+  AnonBuddy Skin - locate WorkBuddy.exe and node.
 .DESCRIPTION
   Prints the auto-detected paths of WorkBuddy.exe and node, to debug
   "apply.ps1 cannot find the app" problems.
@@ -61,7 +61,7 @@ function Find-Node {
 
 $exe = Find-WorkBuddyExe
 $node = Find-Node
-Write-Host "=== WorkBuddy Skin Studio probe ==="
+Write-Host "=== AnonBuddy Skin probe ==="
 Write-Host "WorkBuddy.exe: $(if ($exe) { $exe } else { '(not found)' })"
 Write-Host "node:          $(if ($node) { $node } else { '(not found)' })"
 if (-not $exe) {

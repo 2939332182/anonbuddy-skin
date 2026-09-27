@@ -7,9 +7,9 @@ import { fetchRendererTargets, CdpSession } from "../src/cdp-client.mjs";
 const KEYS = [
   "workbuddyCustomTheme",
   "workbuddyCustomThemes",
-  "workbuddySkinMenuPos",
-  "workbuddySkinAliases",
-  "workbuddySkinLastTheme",
+  "anonbuddySkinMenuPos",
+  "anonbuddySkinAliases",
+  "anonbuddySkinLastTheme",
 ];
 const [mode = "dump", file = "outputs/ls-backup.json", portArg = "9333"] = process.argv.slice(2);
 const PORT = Number(portArg);

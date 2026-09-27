@@ -1,5 +1,5 @@
 ---
-name: workbuddy-skin-studio
+name: anonbuddy-skin
 description: >-
   Apply a reversible theme/skin to the WorkBuddy desktop app (Tencent AI office
   agent) via local Chromium DevTools Protocol (CDP) injection. Use when the user
@@ -9,7 +9,7 @@ description: >-
   theme". Never modifies app.asar, the official install directory, or code signing.
 ---
 
-# WorkBuddy Skin Studio
+# AnonBuddy Skin
 
 Reversible WorkBuddy desktop theming through local CDP injection. The tool
 restarts WorkBuddy with `--remote-debugging-port=9333`, discovers its renderer
@@ -18,7 +18,7 @@ No official files are touched.
 
 ## When this skill applies
 
-- The user gives you a GitHub URL for `workbuddy-skin-studio` (or similar) and
+- The user gives you a GitHub URL for `anonbuddy-skin` (or similar) and
   asks you to install / apply / use it to theme WorkBuddy.
 - The user wants to change WorkBuddy's look (color theme, background image,
   custom uploaded image) without editing the official app.
@@ -44,11 +44,11 @@ No official files are touched.
 1. Clone / open the repo, then run the launcher (double-click works, or CLI):
 
    ```bash
-   # default theme (miku-light)
+   # default theme (aisu)
    ./scripts/apply.command
 
    # or a specific theme via the cross-platform CLI
-   node src/cli.mjs apply --theme genshin-dawn
+   node src/cli.mjs apply --theme chunzhi-night
    ```
 
    `apply.command` quits WorkBuddy, relaunches it with the CDP port, waits for
@@ -68,11 +68,11 @@ No official files are touched.
 1. From the repo directory, run in **PowerShell** (not cmd):
 
    ```powershell
-   # default theme (miku-light)
+   # default theme (aisu)
    .\scripts\apply.ps1
 
    # or a specific theme
-   .\scripts\apply.ps1 -Theme genshin-dawn
+   .\scripts\apply.ps1 -Theme chunzhi-night
    ```
 
    If you hit an execution-policy error, run once:
@@ -104,10 +104,14 @@ No official files are touched.
 ## Choosing a theme
 
 - List available themes: `node src/cli.mjs list` (macOS) / same via PowerShell.
-- Built-ins shipped in `themes/`: `miku-488137`, `genshin-dawn`, `wuthering-echo`.
-  Other presets (`miku-light`, `genshin-night`, `wuthering-tide`, `deepspace-*`,
-  `naruto-*`) were moved to `themes-removed/` — move a folder back into `themes/`
-  and re-apply to bring it back into the menu.
+- Built-ins shipped in `themes/`: `aisu`, `chunzhi-day`, `chunzhi-night`,
+  `miku-sea`, `summer-moon`. All of them ship with the repo, so anyone who
+  clones gets the full set out of the box; add your own by dropping
+  `theme.json` + `hero.webp` into `themes/<id>/` and re-applying.
+- Pin a startup default via the row right-click menu ("set as boot theme"):
+  it outranks the auto-remembered last pick. Only plain themes qualify —
+  Wallpaper Engine entries are machine-local paths and are deliberately excluded,
+  so the wallpaper side can never fight the boot pick.
 - `apply --theme last` restores whatever theme the user last picked in the 🎨 menu,
   custom uploads included. This is what the automatic paths (the login watcher and
   `apply-now.mjs`) use by default, so a WorkBuddy restart no longer resets the user
@@ -170,8 +174,8 @@ renderer hint `renderer/index.html`.
   `localStorage["workbuddyCustomThemes"]` as an **array** — every upload adds an entry,
   nothing is overwritten — and the legacy single-theme key `workbuddyCustomTheme` is
   migrated automatically on first run. Theme display names are overridden via
-  `localStorage["workbuddySkinAliases"]` (id → display name). Scriptable through
-  `window.__workbuddySkin`: `renameTheme(id, name)` (pass `""` to restore the default,
+  `localStorage["anonbuddySkinAliases"]` (id → display name). Scriptable through
+  `window.__anonbuddySkin`: `renameTheme(id, name)` (pass `""` to restore the default,
   `null` for the native row), `deleteCustomTheme(id)`, `importFromDataUrl(dataUrl, name)`,
   plus `customThemes()` / `aliases()` inspectors.
 - `src/injector.mjs` — idempotent CSS+menu injection and removal.
@@ -183,6 +187,6 @@ renderer hint `renderer/index.html`.
 
 ## One-line summary for the user
 
-> "I cloned workbuddy-skin-studio, restarted WorkBuddy in debug mode, and injected
+> "I cloned anonbuddy-skin, restarted WorkBuddy in debug mode, and injected
 > the theme. Use the 🎨 button (top-right) to switch or revert. Re-run apply if
 > you restart WorkBuddy manually."

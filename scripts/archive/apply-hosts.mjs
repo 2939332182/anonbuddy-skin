@@ -39,7 +39,7 @@ const block = [
   '# === WorkBuddy GitHub Fix Start ===',
   '# 说明: 本机 IPv6 无公网路由，DNS 却返回 AAAA 记录，故使用实测最快 IPv4 节点',
   '# 实测: 185.199.109.133 平均 109ms / 4轮 HTTP200 全通过（2026-09-11）',
-  '# 还原: 备份见 D:\\workbuddy-skin-studio\\cleanup-audit\\hosts-backup\\',
+  '# 还原: 备份见 D:\\anonbuddy-skin\\cleanup-audit\\hosts-backup\\',
   '',
   '# --- raw 单文件域（原 hosts 缺失，本次补上）---',
   '185.199.109.133		raw.githubusercontent.com',

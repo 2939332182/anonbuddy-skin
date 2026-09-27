@@ -5,7 +5,7 @@ import { createHarness } from "./_harness.mjs";
 import { spawnSync } from "node:child_process";
 
 const t = await createHarness({ name: "test-restore-last" });
-const MENU_ID = "workbuddy-skin-menu";
+const MENU_ID = "anonbuddy-skin-menu";
 const CTX_ID = `${MENU_ID}-row-menu`;
 
 const { session, sleep, waitFor, check } = t;
@@ -26,11 +26,11 @@ const rowRect = (id) => evaluate(`(() => {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2, label: el.__text.textContent };
 })()`);
 const state = () => evaluate(`(() => ({
-  active: document.documentElement.dataset.workbuddySkin ?? null,
-  lastTheme: window.__workbuddySkin.lastTheme(),
-  storedLast: localStorage.getItem("workbuddySkinLastTheme"),
-  customs: window.__workbuddySkin.customThemes().map((t) => t.id),
-  aliases: window.__workbuddySkin.aliases(),
+  active: document.documentElement.dataset.anonbuddySkin ?? null,
+  lastTheme: window.__anonbuddySkin.lastTheme(),
+  storedLast: localStorage.getItem("anonbuddySkinLastTheme"),
+  customs: window.__anonbuddySkin.customThemes().map((t) => t.id),
+  aliases: window.__anonbuddySkin.aliases(),
 }))()`);
 // 模拟 WorkBuddy 重启后的自动换肤
 const reapply = (theme) => {
@@ -82,12 +82,12 @@ try {
   t.check("原生界面下菜单依然注入", (await evaluate(`!!document.getElementById("${MENU_ID}")`)) === true);
 
   // ---- 5. 记录失效（比如自定义主题被删）→ 退回默认主题 ----
-  await evaluate(`localStorage.setItem("workbuddySkinLastTheme", "custom-已被删除")`);
+  await evaluate(`localStorage.setItem("anonbuddySkinLastTheme", "custom-已被删除")`);
   reapply("last");
   await sleep(200);
   const stale = await state();
-  t.check("记录失效时退回默认主题", stale.active === "miku-488137", String(stale.active));
-  t.check("失效记录被覆盖成实际生效的主题", stale.lastTheme === "miku-488137", String(stale.lastTheme));
+  t.check("记录失效时退回默认主题", stale.active === "aisu", String(stale.active));
+  t.check("失效记录被覆盖成实际生效的主题", stale.lastTheme === "aisu", String(stale.lastTheme));
 
   // ---- 6. 显式指定主题时不受 last 影响 ----
   reapply("wuthering-echo");
@@ -100,18 +100,18 @@ try {
   // 收尾：恢复用户原本的激活主题与别名，并把页面交回给 lastTheme 机制
   await evaluate(`(() => {
     const wantAliases = ${JSON.stringify(initial.aliases)};
-    for (const id of Object.keys(window.__workbuddySkin.aliases())) {
-      window.__workbuddySkin.renameTheme(id === "__native__" ? null : id, "");
+    for (const id of Object.keys(window.__anonbuddySkin.aliases())) {
+      window.__anonbuddySkin.renameTheme(id === "__native__" ? null : id, "");
     }
     for (const [id, name] of Object.entries(wantAliases)) {
-      window.__workbuddySkin.renameTheme(id === "__native__" ? null : id, name);
+      window.__anonbuddySkin.renameTheme(id === "__native__" ? null : id, name);
     }
     return true;
   })()`);
-  if (initial.lastTheme) await evaluate(`localStorage.setItem("workbuddySkinLastTheme", ${JSON.stringify(initial.lastTheme)})`);
+  if (initial.lastTheme) await evaluate(`localStorage.setItem("anonbuddySkinLastTheme", ${JSON.stringify(initial.lastTheme)})`);
   reapply("last");
   await sleep(200);
-  if (initial.active) await evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(initial.active)})`);
+  if (initial.active) await evaluate(`window.__anonbuddySkin.setTheme(${JSON.stringify(initial.active)})`);
   await evaluate(`(() => {
     document.querySelector("#${MENU_ID} > div").style.display = "none";
     document.getElementById(${JSON.stringify(CTX_ID)}).style.display = "none";

@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 
 function listDir(p, max = 30) {
   let e = [];

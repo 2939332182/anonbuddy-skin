@@ -4,7 +4,7 @@
 
 import { createHarness } from "./_harness.mjs";
 const t = await createHarness({ name: "test-custom-themes" });
-const MENU_ID = "workbuddy-skin-menu";
+const MENU_ID = "anonbuddy-skin-menu";
 const CTX_ID = `${MENU_ID}-row-menu`;
 
 const { session, sleep, waitFor, check } = t;
@@ -44,10 +44,10 @@ const ctxItemRect = (index) => evaluate(`(() => {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 })()`);
 const customState = () => evaluate(`(() => ({
-  api: window.__workbuddySkin.customThemes(),
+  api: window.__anonbuddySkin.customThemes(),
   stored: JSON.parse(localStorage.getItem("workbuddyCustomThemes") ?? "[]").map((t) => t.id),
-  aliases: window.__workbuddySkin.aliases(),
-  active: document.documentElement.dataset.workbuddySkin,
+  aliases: window.__anonbuddySkin.aliases(),
+  active: document.documentElement.dataset.anonbuddySkin,
 }))()`);
 
 const initial = await customState();
@@ -62,7 +62,7 @@ try {
   await sleep(150);
   diskTheme = await evaluate(`(() => {
     const panel = document.querySelector("#${MENU_ID} > div");
-    const customIds = window.__workbuddySkin.customThemes().map((t) => t.id);
+    const customIds = window.__anonbuddySkin.customThemes().map((t) => t.id);
     const el = [...panel.children].find((n) => n.__themeId && !customIds.includes(n.__themeId));
     return el ? el.__themeId : null;
   })()`);
@@ -124,8 +124,8 @@ try {
     const grad = ctx2.createLinearGradient(0, 0, 64, 40);
     grad.addColorStop(0, "#ff7ad9"); grad.addColorStop(1, "#2fd6c8");
     ctx2.fillStyle = grad; ctx2.fillRect(0, 0, 64, 40);
-    await window.__workbuddySkin.importFromDataUrl(canvas.toDataURL("image/png"), "测试新图");
-    return window.__workbuddySkin.customThemes();
+    await window.__anonbuddySkin.importFromDataUrl(canvas.toDataURL("image/png"), "测试新图");
+    return window.__anonbuddySkin.customThemes();
   })()`);
   tempId = added[added.length - 1].id;
   console.log("AFTER_ADD=" + JSON.stringify(added.map((t) => t.id)));
@@ -147,7 +147,7 @@ try {
   t.check("行内不再挂删除按钮（省宽度）", rowChildren.children === 2 && rowChildren.hasDel === false, JSON.stringify(rowChildren));
 
   // ---- 9. 给临时主题起别名，再通过右键菜单删除它（别名应一并清理）----
-  await evaluate(`window.__workbuddySkin.renameTheme(${JSON.stringify(tempId)}, "临时别名")`);
+  await evaluate(`window.__anonbuddySkin.renameTheme(${JSON.stringify(tempId)}, "临时别名")`);
   t.check("临时主题别名已写入", (await customState()).aliases[tempId] === "临时别名");
 
   const tempRow = await rowRect(tempId);
@@ -167,21 +167,21 @@ try {
   tempId = null;
 
   // ---- 10. 删不存在的 id 返回 false ----
-  t.check("删除不存在的主题返回 false", (await evaluate(`window.__workbuddySkin.deleteCustomTheme("no-such-theme")`)) === false);
+  t.check("删除不存在的主题返回 false", (await evaluate(`window.__anonbuddySkin.deleteCustomTheme("no-such-theme")`)) === false);
 } finally {
   // 收尾：清掉可能残留的测试主题与别名，还原用户的激活主题
   await evaluate(`(() => {
-    if (${JSON.stringify(tempId)} !== null) window.__workbuddySkin.deleteCustomTheme(${JSON.stringify(tempId)});
+    if (${JSON.stringify(tempId)} !== null) window.__anonbuddySkin.deleteCustomTheme(${JSON.stringify(tempId)});
     const wantAliases = ${JSON.stringify(initial.aliases)};
-    for (const id of Object.keys(window.__workbuddySkin.aliases())) {
-      window.__workbuddySkin.renameTheme(id === "__native__" ? null : id, "");
+    for (const id of Object.keys(window.__anonbuddySkin.aliases())) {
+      window.__anonbuddySkin.renameTheme(id === "__native__" ? null : id, "");
     }
     for (const [id, name] of Object.entries(wantAliases)) {
-      window.__workbuddySkin.renameTheme(id === "__native__" ? null : id, name);
+      window.__anonbuddySkin.renameTheme(id === "__native__" ? null : id, name);
     }
     document.querySelector("#${MENU_ID} > div").style.display = "none";
     document.getElementById(${JSON.stringify(CTX_ID)}).style.display = "none";
-    if (${JSON.stringify(initial.active)} !== null) window.__workbuddySkin.setTheme(${JSON.stringify(initial.active)});
+    if (${JSON.stringify(initial.active)} !== null) window.__anonbuddySkin.setTheme(${JSON.stringify(initial.active)});
     return true;
   })()`);
   const final = await customState();

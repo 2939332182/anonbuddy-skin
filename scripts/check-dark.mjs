@@ -9,7 +9,7 @@ const probe = `(() => {
   const bg = (sel) => { const el = document.querySelector(sel); return el ? getComputedStyle(el).backgroundColor : "NONE"; };
   const body = getComputedStyle(document.body);
   return {
-    theme: document.documentElement.dataset.workbuddySkin,
+    theme: document.documentElement.dataset.anonbuddySkin,
     mode: document.body.dataset.vscodeThemeKind,
     glass: body.getPropertyValue("--wb-glass").trim().slice(0, 60),
     text: body.getPropertyValue("--wb-text").trim(),
@@ -20,8 +20,8 @@ const probe = `(() => {
 })()`;
 
 console.log("LIGHT=" + JSON.stringify(await s.evaluate(probe)));
-await s.evaluate(`window.__workbuddySkin.setTheme("genshin-night")`);
+await s.evaluate(`window.__anonbuddySkin.setTheme("genshin-night")`);
 console.log("DARK =" + JSON.stringify(await s.evaluate(probe)));
-await s.evaluate(`window.__workbuddySkin.setTheme("miku-488137")`);
+await s.evaluate(`window.__anonbuddySkin.setTheme("aisu")`);
 console.log("BACK =" + JSON.stringify(await s.evaluate(probe)));
 s.close();

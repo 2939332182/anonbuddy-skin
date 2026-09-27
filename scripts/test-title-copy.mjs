@@ -46,7 +46,7 @@ const state = await session.evaluate(`(() => {
     h1: pick(h1),
     span: pick(span),
     rollExists: Boolean(document.querySelector(".wb-home-header__title-roll")),
-    styleText: document.getElementById("workbuddy-skin-style")?.textContent?.length ?? 0,
+    styleText: document.getElementById("anonbuddy-skin-style")?.textContent?.length ?? 0,
   };
 })()`);
 
@@ -112,7 +112,7 @@ const perChar = await session.evaluate(`(() => {
   });
 })()`);
 t.check("标题已拆成逐字节点", perChar.length > 1, `${perChar.length} 个字`);
-t.check("每个字都挂了打字动画", perChar.length > 0 && perChar.every((c) => c.anim === "workbuddy-skin-char-type-in"),
+t.check("每个字都挂了打字动画", perChar.length > 0 && perChar.every((c) => c.anim === "anonbuddy-skin-char-type-in"),
   perChar[0]?.anim);
 t.check("每字动画时长一致", new Set(perChar.map((c) => c.dur)).size === 1, perChar[0]?.dur);
 t.check("每字延迟从左到右递增", (() => {
@@ -147,8 +147,8 @@ t.check("侧边栏其它按钮文案未被改动", sidebarLeak.includes("新建�
 
 // ---- 原文案能识别（幂等，不会重复替换）----
 const idempotent = await session.evaluate(`(() => {
-  window.__workbuddySkin?.copy?.apply?.();
-  window.__workbuddySkin?.copy?.apply?.();
+  window.__anonbuddySkin?.copy?.apply?.();
+  window.__anonbuddySkin?.copy?.apply?.();
   const brand = document.querySelector(".logo-workbuddy-title")?.textContent?.trim();
   const h1 = document.querySelector(".wb-home-header__title")?.textContent?.trim();
   return { brand, h1 };

@@ -11,14 +11,14 @@ const { session: s, check } = t;
 
 const readMenu = () =>
   s.evaluate(`(() => {
-    const m = document.getElementById("workbuddy-skin-menu");
+    const m = document.getElementById("anonbuddy-skin-menu");
     if (!m) return null;
     const r = m.getBoundingClientRect();
     const b = m.querySelector("button")?.getBoundingClientRect();
     return {
       mx: Math.round(r.x), my: Math.round(r.y),
       bx: b ? b.x + b.width / 2 : null, by: b ? b.y + b.height / 2 : null,
-      saved: localStorage.getItem("workbuddySkinMenuPos"),
+      saved: localStorage.getItem("anonbuddySkinMenuPos"),
     };
   })()`);
 
@@ -58,10 +58,10 @@ try {
 } finally {
   // 收尾：恢复到默认位置，保证状态中性
   const reset = await s.evaluate(`(() => {
-    window.__workbuddySkin.resetPosition();
-    const m = document.getElementById("workbuddy-skin-menu");
+    window.__anonbuddySkin.resetPosition();
+    const m = document.getElementById("anonbuddy-skin-menu");
     const r = m.getBoundingClientRect();
-    return { mx: Math.round(r.x), my: Math.round(r.y), saved: localStorage.getItem("workbuddySkinMenuPos") };
+    return { mx: Math.round(r.x), my: Math.round(r.y), saved: localStorage.getItem("anonbuddySkinMenuPos") };
   })()`);
   console.log("RESET=", JSON.stringify(reset));
   check("resetPosition 后已清除持久化位置", reset.saved === null, String(reset.saved));

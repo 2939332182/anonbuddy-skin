@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "chunzhi-night",
+  "name": "春至双背景 · 夜",
+  "hero": "hero.webp",
+  "colors": {
+    "accent": "#5d81da",
+    "secondary": "#4764be",
+    "surface": "#f4f6fc",
+    "text": "#151d31"
+  }
+}

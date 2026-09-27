@@ -57,7 +57,7 @@ const result = await session.evaluate(`(() => {
   }
   out.sort((a, b) => b.w * b.h - a.w * a.h);
   return {
-    dataset: document.documentElement.dataset.workbuddySkin ?? null,
+    dataset: document.documentElement.dataset.anonbuddySkin ?? null,
     total: out.length,
     top: out.slice(0, 14),
   };

@@ -47,8 +47,16 @@ try {
   }
 
   // ---- 样式表里那条透明规则必须排除浮层 ----
-  const css = await evaluate(`document.getElementById("workbuddy-skin-style")?.textContent ?? ""`);
-  t.check("透明规则排除了 popover", css.includes(`body > :not(#workbuddy-skin-menu):not([class*="popover"])`));
+  const css = await evaluate(`document.getElementById("anonbuddy-skin-style")?.textContent ?? ""`);
+  // ⚠️ 不要用"整段选择器逐字匹配"：这条规则会随着新增注入物而变长
+  //    （2026-09-20 加了 :not(#anonbuddy-skin-bg) 就把逐字匹配的断言打红过一次）。
+  //    只断言"必须被排除的那几类"都出现在选择器里，既能守住意图，又不会一动就误报。
+  t.check(
+    "透明规则排除了 popover 与皮肤自己的注入物",
+    css.includes(`body > :not(#anonbuddy-skin-menu)`) &&
+      css.includes(`:not(#anonbuddy-skin-bg)`) &&
+      css.includes(`:not([class*="popover"])`),
+  );
   t.check("透明规则排除了 modal / dialog / context-menu",
     css.includes(`:not([class*="modal"])`) && css.includes(`:not([class*="dialog"])`) && css.includes(`:not([class*="context-menu"])`));
   t.check("样式表含浮层实底规则", css.includes(".user-menu-popover") && css.includes("--wb-glass) 42%, var(--wb-surface)"));

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  WorkBuddy Skin Studio - Windows pause
+  AnonBuddy Skin - Windows pause
 .DESCRIPTION
   Remove the skin and go back to the native UI (no restart).
 .PARAMETER Port

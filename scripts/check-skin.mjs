@@ -23,19 +23,19 @@ const expr = `(() => {
     if (alpha(cs.backgroundColor) < 0.5) continue;
     const r = el.getBoundingClientRect();
     if (r.width * r.height < ${MIN_AREA}) continue;
-    if (el.closest("#workbuddy-skin-menu")) continue;
+    if (el.closest("#anonbuddy-skin-menu")) continue;
     rows.push({ t: el.tagName, id: el.id || "", c: (el.className || "").toString().slice(0, 40),
       bg: cs.backgroundColor, w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), y: Math.round(r.y) });
   }
   rows.sort((a, b) => b.w * b.h - a.w * a.h);
-  const style = document.getElementById("workbuddy-skin-style");
+  const style = document.getElementById("anonbuddy-skin-style");
   const css = style ? style.textContent : "";
   const probe = (sel) => {
     const el = document.querySelector(sel);
     return el ? getComputedStyle(el).backgroundColor : "NO_ELEMENT";
   };
   return {
-    theme: document.documentElement.dataset.workbuddySkin ?? null,
+    theme: document.documentElement.dataset.anonbuddySkin ?? null,
     styleExists: !!style,
     cssLength: css.length,
     hasToolbarRule: css.includes("cr-input-toolbar__right"),

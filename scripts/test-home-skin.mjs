@@ -9,7 +9,7 @@ const { session } = t;
 
 const state = await session.evaluate(`(() => {
   const cs = getComputedStyle(document.body);
-  const style = document.getElementById("workbuddy-skin-style");
+  const style = document.getElementById("anonbuddy-skin-style");
   return {
     skin: style ? style.textContent : "",
     vars: {

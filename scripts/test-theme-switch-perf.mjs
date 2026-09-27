@@ -25,7 +25,7 @@ const SYNC_BUDGET_MS = 40;
 // 连续切换的**最坏单次**上限。压力场景下偶有抖动，给得比中位宽一些。
 const WORST_BUDGET_MS = 90;
 
-const hasApi = await evaluate(`Boolean(window.__workbuddySkin)`);
+const hasApi = await evaluate(`Boolean(window.__anonbuddySkin)`);
 check("注入脚本 API 存在", hasApi === true, String(hasApi));
 
 const initialTheme = await t.currentThemeId();
@@ -78,7 +78,7 @@ if (!Array.isArray(themeIds) || themeIds.length < 2) {
   const settingsOpen = await openSettings();
   check("能打开设置弹窗以读取主题清单", settingsOpen === true, String(settingsOpen));
   if (settingsOpen === true) {
-    await evaluate(`document.getElementById("workbuddy-skin-menu-settings-entry")?.click()`);
+    await evaluate(`document.getElementById("anonbuddy-skin-menu-settings-entry")?.click()`);
     await sleep(600);
     themeIds = await readThemeIds();
   }
@@ -95,7 +95,7 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
 
   // ---- 1. 单次切换的同步耗时（强制冲刷样式，量的是用户真正感知到的卡顿）----
   const timing = await evaluate(`(async () => {
-    const api = window.__workbuddySkin;
+    const api = window.__anonbuddySkin;
     // 预热：首次上样式有固定成本，不计入统计
     api.setTheme(${JSON.stringify(a)}); void document.body.offsetHeight;
     api.setTheme(${JSON.stringify(b)}); void document.body.offsetHeight;
@@ -128,8 +128,8 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
   // ---- 2. 关键回归点：applyMode 不该在"类状态已经正确"时再动 DOM ----
   // 这是根因。旧实现对 6 个类无条件 toggle，即使一个都没变也触发全量样式失效。
   const noopProbe = await evaluate(`(() => {
-    const api = window.__workbuddySkin;
-    const el = document.getElementById("workbuddy-skin-style");
+    const api = window.__anonbuddySkin;
+    const el = document.getElementById("anonbuddy-skin-style");
     const before = el.textContent;
     // 同一主题连切两次：第二次应当几乎不产生额外开销
     api.setTheme(${JSON.stringify(a)}); void document.body.offsetHeight;
@@ -147,7 +147,7 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
 
   // ---- 3. 压力：连续切换不应卡死渲染器 ----
   const stress = await evaluate(`(async () => {
-    const api = window.__workbuddySkin;
+    const api = window.__anonbuddySkin;
     const ids = ${JSON.stringify(themeIds)};
     let worst = 0, sum = 0, n = 0, longTasks = 0;
     try {
@@ -182,7 +182,7 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
 
   // ---- 4. 深色主题下打开设置界面，文字对比度必须达标 ----
   const deepTheme = themeIds.find((id) => /wuthering|dark|night/i.test(id)) ?? b;
-  await evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(deepTheme)})`);
+  await evaluate(`window.__anonbuddySkin.setTheme(${JSON.stringify(deepTheme)})`);
   await sleep(600);
 
   // 打开设置 → 进插件面板（面板是设置界面里文字最密集的地方）
@@ -190,7 +190,7 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
   check("深色主题下能打开设置弹窗", opened === true, String(opened));
 
   if (opened === true) {
-    await evaluate(`document.getElementById("workbuddy-skin-menu-settings-entry")?.click()`);
+    await evaluate(`document.getElementById("anonbuddy-skin-menu-settings-entry")?.click()`);
     await sleep(500);
 
     // 逐元素算 WCAG 对比度；半透明前景先合成到实底上再算
@@ -232,7 +232,7 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
       probe("导航条目", overlay.querySelector(".settings-navigation__item"));
       probe("导航分组标题", overlay.querySelector(".settings-navigation__group-title"));
       probe("弹窗标题", overlay.querySelector(".settings-modal__header, .settings-modal__content h1, .settings-modal__content h2"));
-      const pane = document.getElementById("workbuddy-skin-menu-settings-pane");
+      const pane = document.getElementById("anonbuddy-skin-menu-settings-pane");
       if (pane) {
         probe("插件面板头部", pane.firstElementChild);
         probe("插件面板分组标题", pane.querySelector("p"));
@@ -263,19 +263,19 @@ if (Array.isArray(themeIds) && themeIds.length >= 2) {
 
 // ---- 收尾：还原到测试开始时的主题 ----
 // ⚠️ 不能再用 t.applyLast() 来还原：本测试中途 setTheme(deepTheme) 已经把
-// "上次用的主题"（workbuddySkinLastTheme）改写成了 wuthering-echo，
+// "上次用的主题"（anonbuddySkinLastTheme）改写成了 wuthering-echo，
 // 而 applyLast() 读的正是那个键 —— 结果"还原"成的是本测试最后切到的主题，
 // 不是测试开始时的主题。基线恰好是 wuthering-echo 时才碰巧通过（潜伏 bug，2026-09-19 修）。
 // 正确做法：直接按 initialTheme 还原，并把被本测试改写的 localStorage 键写回快照值。
 // 注意顺序：必须在 finish() 之前读，finish 会把 CDP 连接关掉。
 const storageSnapshot = await evaluate(`(() => ({
-  lastTheme: localStorage.getItem("workbuddySkinLastTheme"),
+  lastTheme: localStorage.getItem("anonbuddySkinLastTheme"),
   scopedKeys: Object.keys(localStorage)
     .filter((k) => k.indexOf("workbuddy.appearance.mode::") === 0)
     .reduce((acc, k) => { acc[k] = localStorage.getItem(k); return acc; }, {}),
 }))()`);
 if (initialTheme) {
-  await evaluate(`window.__workbuddySkin.setTheme(${JSON.stringify(initialTheme)})`);
+  await evaluate(`window.__anonbuddySkin.setTheme(${JSON.stringify(initialTheme)})`);
   await sleep(400);
 } else if (typeof t.applyLast === "function") {
   // 测试开始时就没有皮肤（initialTheme=null）：走正常恢复路径
@@ -284,7 +284,7 @@ if (initialTheme) {
 await evaluate(`(() => {
   const s = ${JSON.stringify(storageSnapshot)};
   const restoreKey = (k, v) => { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); };
-  restoreKey("workbuddySkinLastTheme", s.lastTheme);
+  restoreKey("anonbuddySkinLastTheme", s.lastTheme);
   for (const k of Object.keys(localStorage)) {
     if (k.indexOf("workbuddy.appearance.mode::") === 0 && !(k in s.scopedKeys)) localStorage.removeItem(k);
   }

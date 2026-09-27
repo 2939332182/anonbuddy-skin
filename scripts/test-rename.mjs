@@ -8,14 +8,14 @@ const { session, sleep, waitFor, check, evaluate } = t;
 
 // 先展开面板，再取坐标 —— display:none 时 getBoundingClientRect 全是 0，右键会打空
 await session.evaluate(`(() => {
-  document.querySelector("#workbuddy-skin-menu > div").style.display = "block";
+  document.querySelector("#anonbuddy-skin-menu > div").style.display = "block";
   return true;
 })()`);
 await sleep(150);
 
 // 面板行：拿一个磁盘主题行 + 原生界面行做样本
 const pick = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const items = [...panel.children].filter((el) => el.__themeId !== undefined);
   const target = items.find((el) => el.__themeId && el.__themeId !== "custom-upload") ?? items[0];
   const native = items.find((el) => el.__themeId === null);
@@ -37,10 +37,10 @@ console.log("SAMPLE=" + JSON.stringify(pick));
 if (!pick.x || !pick.y) throw new Error("面板行坐标异常，无法继续测试");
 
 // 收尾要还原的激活主题与别名，提前抓下来（后面会重新注入，dataset 会变）
-const INITIAL_THEME = await session.evaluate(`document.documentElement.dataset.workbuddySkin ?? null`);
-const INITIAL_ALIASES = await session.evaluate(`window.__workbuddySkin.aliases()`);
+const INITIAL_THEME = await session.evaluate(`document.documentElement.dataset.anonbuddySkin ?? null`);
+const INITIAL_ALIASES = await session.evaluate(`window.__anonbuddySkin.aliases()`);
 
-const CTX_ID = "workbuddy-skin-menu-row-menu";
+const CTX_ID = "anonbuddy-skin-menu-row-menu";
 const rightClick = async (x, y) => {
   await session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "right", buttons: 2, clickCount: 1 });
   await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", buttons: 0, clickCount: 1 });
@@ -50,7 +50,7 @@ const ctxOpen = () => session.evaluate(`document.getElementById(${JSON.stringify
 // 走完整路径：右键出菜单 → 点「重命名」进编辑态（真实鼠标路径由 test-custom-themes.mjs 覆盖）
 const startRename = async (id) => {
   await session.evaluate(`(() => {
-    const panel = document.querySelector("#workbuddy-skin-menu > div");
+    const panel = document.querySelector("#anonbuddy-skin-menu > div");
     const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(id)});
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     document.getElementById(${JSON.stringify(CTX_ID)}).children[0].click();
@@ -59,7 +59,7 @@ const startRename = async (id) => {
   await sleep(150);
 };
 const readInput = () => session.evaluate(`(() => {
-  const input = document.querySelector("#workbuddy-skin-menu input[type=text]");
+  const input = document.querySelector("#anonbuddy-skin-menu input[type=text]");
   return input ? { value: input.value, focused: document.activeElement === input } : null;
 })()`);
 
@@ -90,14 +90,14 @@ await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code
 await sleep(200);
 
 const afterSave = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(pick.themeId)});
   return {
     label: el.__text.textContent,
-    stillEditing: !!document.querySelector("#workbuddy-skin-menu input[type=text]"),
-    aliases: window.__workbuddySkin.aliases(),
-    stored: localStorage.getItem("workbuddySkinAliases"),
-    activeTheme: document.documentElement.dataset.workbuddySkin,
+    stillEditing: !!document.querySelector("#anonbuddy-skin-menu input[type=text]"),
+    aliases: window.__anonbuddySkin.aliases(),
+    stored: localStorage.getItem("anonbuddySkinAliases"),
+    activeTheme: document.documentElement.dataset.anonbuddySkin,
   };
 })()`);
 console.log("AFTER_SAVE=" + JSON.stringify(afterSave));
@@ -112,7 +112,7 @@ await session.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: 
 await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65 });
 await session.send("Input.insertText", { text: "" });
 await session.evaluate(`(() => {
-  const input = document.querySelector("#workbuddy-skin-menu input[type=text]");
+  const input = document.querySelector("#anonbuddy-skin-menu input[type=text]");
   input.value = "";
   return true;
 })()`);
@@ -121,9 +121,9 @@ await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code
 await sleep(200);
 
 const afterReset = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(pick.themeId)});
-  return { label: el.__text.textContent, aliases: window.__workbuddySkin.aliases() };
+  return { label: el.__text.textContent, aliases: window.__anonbuddySkin.aliases() };
 })()`);
 console.log("AFTER_RESET=" + JSON.stringify(afterReset));
 t.check("清空后恢复默认名", afterReset.label === pick.label, afterReset.label);
@@ -137,9 +137,9 @@ await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", cod
 await sleep(200);
 
 const afterEsc = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === null);
-  return { label: el.__text.textContent, aliases: window.__workbuddySkin.aliases(), editing: !!document.querySelector("#workbuddy-skin-menu input[type=text]") };
+  return { label: el.__text.textContent, aliases: window.__anonbuddySkin.aliases(), editing: !!document.querySelector("#anonbuddy-skin-menu input[type=text]") };
 })()`);
 console.log("AFTER_ESC=" + JSON.stringify(afterEsc));
 t.check("Esc 取消后名称不变", afterEsc.label === pick.nativeLabel, afterEsc.label);
@@ -148,7 +148,7 @@ t.check("Esc 后退出编辑态", afterEsc.editing === false);
 
 // ---- 5. 不可重命名的行（＋ 自定义图片）没有右键入口 ----
 const uploadRow = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === undefined);
   return el ? { label: el.__text.textContent, hasTitle: !!el.title } : null;
 })()`);
@@ -157,25 +157,25 @@ t.check("上传行不参与重命名", uploadRow?.hasTitle === false);
 
 // ---- 6. 脚本化 API ----
 const api = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(pick.themeId)});
-  window.__workbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "API 改名");
+  window.__anonbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "API 改名");
   const mid = el.__text.textContent;
-  window.__workbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "");
-  return { mid, back: el.__text.textContent, aliases: window.__workbuddySkin.aliases() };
+  window.__anonbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "");
+  return { mid, back: el.__text.textContent, aliases: window.__anonbuddySkin.aliases() };
 })()`);
 console.log("API=" + JSON.stringify(api));
 t.check("renameTheme 生效", api.mid === "API 改名", api.mid);
 t.check("renameTheme 传空串可还原", api.back === pick.label, api.back);
 
 // ---- 7. 回归：带别名重新注入后，「清空还原」必须回到主题真名而不是上次的别名 ----
-await session.evaluate(`window.__workbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "别名X")`);
+await session.evaluate(`window.__anonbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "别名X")`);
 const reinject = spawnSync(process.execPath, ["src/cli.mjs", "apply", "--port", String(t.port), "--theme", pick.themeId], { encoding: "utf8" });
 if (reinject.status !== 0) throw new Error(reinject.stderr || "重新注入失败");
 await sleep(300);
 
 const reloaded = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   panel.style.display = "block";
   const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(pick.themeId)});
   return { shown: el.__text.textContent, defaultLabel: el.__defaultLabel };
@@ -185,10 +185,10 @@ t.check("重注入后别名仍显示", reloaded.shown === "别名X", reloaded.sh
 t.check("重注入后默认名未被别名污染", reloaded.defaultLabel === pick.label, `${reloaded.defaultLabel} vs ${pick.label}`);
 
 const cleared = await session.evaluate(`(() => {
-  const panel = document.querySelector("#workbuddy-skin-menu > div");
+  const panel = document.querySelector("#anonbuddy-skin-menu > div");
   const el = [...panel.children].find((n) => n.__themeId === ${JSON.stringify(pick.themeId)});
-  window.__workbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "");
-  return { label: el.__text.textContent, aliases: window.__workbuddySkin.aliases() };
+  window.__anonbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, "");
+  return { label: el.__text.textContent, aliases: window.__anonbuddySkin.aliases() };
 })()`);
 console.log("CLEARED=" + JSON.stringify(cleared));
 t.check("清除别名后回到主题真名", cleared.label === pick.label, cleared.label);
@@ -198,12 +198,12 @@ t.check("清除别名后回到主题真名", cleared.label === pick.label, clear
   // 放在 finally 里 —— 测试中途崩掉也不会把用户的主题/别名留在脏状态。
   await session.evaluate(`(() => {
     const want = ${JSON.stringify(INITIAL_ALIASES)};
-    document.querySelector("#workbuddy-skin-menu > div").style.display = "none";
+    document.querySelector("#anonbuddy-skin-menu > div").style.display = "none";
     document.getElementById(${JSON.stringify(CTX_ID)}).style.display = "none";
     // 只还原本测试动过的两行，其余别名原样不动
-    window.__workbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, want[${JSON.stringify(pick.themeId)}] ?? "");
-    window.__workbuddySkin.renameTheme(null, want.__native__ ?? "");
-    if (${JSON.stringify(INITIAL_THEME)} !== null) window.__workbuddySkin.setTheme(${JSON.stringify(INITIAL_THEME)});
+    window.__anonbuddySkin.renameTheme(${JSON.stringify(pick.themeId)}, want[${JSON.stringify(pick.themeId)}] ?? "");
+    window.__anonbuddySkin.renameTheme(null, want.__native__ ?? "");
+    if (${JSON.stringify(INITIAL_THEME)} !== null) window.__anonbuddySkin.setTheme(${JSON.stringify(INITIAL_THEME)});
     return true;
   })()`);
   console.log("RESTORED_THEME=" + INITIAL_THEME);

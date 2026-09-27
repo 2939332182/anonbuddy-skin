@@ -8,7 +8,7 @@ import { fetchRendererTargets, CdpSession } from "../src/cdp-client.mjs";
 const PORT = Number(process.argv[2] || 9333);
 const OUT = process.argv[3] || "outputs/verify-menu/menu-demo.png";
 const WHICH = process.argv[4] || "custom";
-const MENU_ID = "workbuddy-skin-menu";
+const MENU_ID = "anonbuddy-skin-menu";
 const CTX_ID = `${MENU_ID}-row-menu`;
 
 const session = new CdpSession((await fetchRendererTargets(PORT))[0].webSocketDebuggerUrl);
@@ -19,7 +19,7 @@ const state = await session.evaluate(`(() => {
   const panel = document.querySelector("#${MENU_ID} > div");
   panel.style.display = "block";
   const rows = [...panel.children].filter((el) => el.__themeId !== undefined);
-  const customIds = window.__workbuddySkin.customThemes().map((t) => t.id);
+  const customIds = window.__anonbuddySkin.customThemes().map((t) => t.id);
   const target = ${JSON.stringify(WHICH)} === "disk"
     ? rows.find((el) => !customIds.includes(el.__themeId) && el.__themeId)
     : rows.filter((el) => customIds.includes(el.__themeId)).pop() ?? rows.find((el) => customIds.includes(el.__themeId));

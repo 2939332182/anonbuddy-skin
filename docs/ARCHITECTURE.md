@@ -7,7 +7,7 @@
 ## 一、整体结构
 
 ```
-workbuddy-skin-studio/
+anonbuddy-skin/
 ├── src/
 │   ├── cli.mjs            # 命令入口：help / list / create / apply / pause / status / doctor
 │   ├── injector.mjs       # 编排：读主题 → 生成 CSS+脚本 → 通过 CDP 推给 renderer
@@ -51,10 +51,10 @@ hero.webp  ─┼─> injector.applySkin
 | 键 | 内容 |
 |---|---|
 | `workbuddyCustomThemes` | 用户上传的自定义主题数组（含 dataURL） |
-| `workbuddySkinLastTheme` | 上次选用的主题 id（`__native__` = 原生界面） |
-| `workbuddySkinMenuPos` | 图标位置，**贴边锚点** `{ax,dx,y}` |
-| `workbuddySkinAliases` | 显示名别名表（只改显示名，不动磁盘） |
-| `workbuddySkinIconHidden` | 悬浮图标是否隐藏（`"1"`/`"0"`；设置面板里的开关） |
+| `anonbuddySkinLastTheme` | 上次选用的主题 id（`__native__` = 原生界面） |
+| `anonbuddySkinMenuPos` | 图标位置，**贴边锚点** `{ax,dx,y}` |
+| `anonbuddySkinAliases` | 显示名别名表（只改显示名，不动磁盘） |
+| `anonbuddySkinIconHidden` | 悬浮图标是否隐藏（`"1"`/`"0"`；设置面板里的开关） |
 | `workbuddyCustomTheme` | **旧版遗留**，首次运行会迁移进 `workbuddyCustomThemes` 后删除 |
 
 ---
@@ -71,9 +71,11 @@ hero.webp  ─┼─> injector.applySkin
 | 改 `injector.mjs` / `removeSkin` / 收尾逻辑 | `--suite core`（**必须**，含幂等回归） | ~40s |
 | 改菜单交互（重命名/删除/上传/拖动） | `--suite menu` | ~30s |
 | 改**设置面板集成**（插件条目 / 面板皮肤列表 / 悬浮图标开关） | `--suite ui`（含 `test-settings-panel`） | ~35s |
+| 改**两个外观调节项**或**背景图层结构**（`body::before` / hero 位置） | `--suite ui`（含 `test-tunables`，**必须**） | ~40s |
+| 改**Wallpaper Engine 集成**或背景图层的媒体播放 | `--suite ui`（含 `test-we`，**必须**） | ~60s |
 | 改 `applyMode` / 深浅色类切换 / 设置界面配色 | `--suite ui`（含 `test-theme-switch-perf`） | ~45s |
 | 改**浮层底色或文字色**（个人中心菜单 / 下拉 / 右键菜单） | `--suite ui`（含 `test-popover-contrast`，**必须**） | ~60s |
-| 改**外观联动**（`applyMode` / `data-skin` 契约 / 浅色禁用深色 / 交还控制权） | `--suite ui`（含 `test-appearance-linkage`，**必须**） | ~50s |
+| 改**外观联动**（`applyMode` / `data-skin` 契约 / **双向外观护栏** / 交还控制权） | `--suite ui`（含 `test-appearance-linkage`，**必须**） | ~50s |
 | 改 `scripts/*.ps1` | `npm run test:static` | 秒级 |
 | 改 `package.json` / 新增脚本 | `npm run test:static` | 秒级 |
 | 发版前 / 大重构 | `npm run test:all` | ~2min |
@@ -147,10 +149,10 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 | 设置弹窗根 | `.settings-modal-overlay` | 打开才存在 |
 | 左侧导航 | `.settings-navigation` | React 每次打开都会重建 |
 | 分组 | `.settings-navigation__group` + `__group-title` | 我们插进「功能」分组 |
-| 我们的条目 | `#workbuddy-skin-menu-settings-entry` | `button.settings-navigation__item` |
+| 我们的条目 | `#anonbuddy-skin-menu-settings-entry` | `button.settings-navigation__item` |
 | 右侧内容区 | `.settings-modal__content` | 原生面板与其同级 |
 | 原生面板 | `.settings-modal__header` / `.settings-modal__panel` | 我们**只隐藏不删除**（React 要管） |
-| 我们的面板 | `#workbuddy-skin-menu-settings-pane` | `data-wb-plugin-pane="1"` 作孤儿标记 |
+| 我们的面板 | `#anonbuddy-skin-menu-settings-pane` | `data-wb-plugin-pane="1"` 作孤儿标记 |
 
 ### 三条必须知道的约束
 
@@ -163,9 +165,149 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
    白弹窗上白字白底 → **整个面板看起来是空的**。
    现在 `paneSurface()` 直接读 `.settings-modal__content` 的 `computedStyle.backgroundColor` 判断深浅。
 
-### 悬浮图标开关
+### 皮肤列表：三列网格（2026-09-20）
 
-`localStorage["workbuddySkinIconHidden"]`（`"1"`/`"0"`）。隐藏后 `button.style.display = "none"`，
+面板里三个分组：**皮肤列表 / 添加皮肤 / 悬浮图标**。皮肤列表原本是单列，
+每行占满整宽、右侧大片留白，主题一多列表就拉得很长；现在改成 **3 列网格**
+（`display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:6px`），
+9 个主题正好 3×3，列表高度约减半。
+
+三条实现要点：
+
+1. **只改 `buildSettingsPane()` 里的 `mk()`，不要动 `row()`**。`row()` 是悬浮 🎨 菜单
+   与设置面板**共用**的行工厂，改它的默认样式会连带改掉悬浮菜单的观感。
+   面板侧的差异一律用 `mk()` 里的内联覆盖表达（这是本仓库既有的写法）。
+2. **每格自带圆角与边框，删掉了原来的 `borderTop` 行间分隔线**。
+   ⚠️ 不要改用「1px gap + 借容器底色当分隔线」的 hairline 技巧：深色下
+   `--wb-pane-card` 是 `rgba(255,255,255,.06)` **半透明**，容器底色会透上来，分隔线直接失效。
+3. **悬停底色要跟随面板主题**。`row()` 的默认 hover 是硬编码 `rgba(0,0,0,.05)`，
+   在深色设置面板上等于"黑压黑"、毫无反馈 → `row()` 新增 `options.hoverBg` 与
+   `options.onLeave`，面板传 `var(--wb-pane-hover)`（由 `syncPaneThemeVars` 按弹窗深浅给值）。
+   `onLeave` 必须重算选中态（`syncPaneSelection`）：网格里每格是独立卡片，
+   悬浮菜单那套 `paint()` 擦不掉面板行的悬停底。
+
+选中态除底色 + ✓ 外，还额外给一道强调色描边（网格里比单个 ✓ 醒目）。
+
+**回归测试**：`scripts/test-settings-panel.mjs`（**56 项断言**）新增 4b 节 5 项（网格布局）+ 6b 节 5 项
+（切主题后 `html[data-theme]` 与面板配色必须**立刻**刷新，不做额外交互），
+钉住「容器是 grid / 固定 3 列 / 每行 3 个 / 每格 8px 圆角 + 1px 边框 / gap 6px /
+`--wb-pane-hover` 有值」。已反证：列表退回单列 → 4 项失败。
+
+### 两个外观调节项：侧边栏毛玻璃 / 背景图模糊（2026-09-20）
+
+面板第四个分组「外观调节」里两个 `input[type=range]`，取值 **1..100**：
+
+| 调节项 | 存储键字段 | 换算 | 默认 | 写到哪 |
+|---|---|---|---|---|
+| 侧边栏毛玻璃 | `sidebarBlur` | ×0.24 → 0.24–24px | **100**（= 原来的 24px） | 侧边栏元素的**内联** `backdrop-filter` |
+| 背景图模糊 | `bgBlur` | ×0.3 → 0.3–30px | **1**（≈0.3px，肉眼无感） | 背景图层的**内联** `filter` + `inset` |
+
+默认值刻意与"没这功能之前"的观感一致。**两个值都不写 CSS 变量**（原因见下面的性能一节）。
+
+**结构：hero 从 `body` 的 background 挪进了独立图层 `#anonbuddy-skin-bg`。**
+理由是硬性的：**CSS 无法对元素自身的 `background-image` 施加 `filter: blur()`**。
+图层要点：
+
+- 由注入脚本创建、挂在 `body` 下：`position: fixed; inset: 0; z-index: -1; pointer-events: none`
+- 图层自带 `background-color: {{surface}}` + 两层遮罩 + `url({{hero}})` —— **它是唯一的背景来源**
+- `body` 必须是 `background: transparent`，**不能**填主题底色
+- ⚠️ 必须把 `#anonbuddy-skin-bg` 加进 `body > :not(...)` 那条"子节点透明"规则的排除名单，
+  否则它的底色会被 `!important` 抹掉
+- `inset` 随模糊量反向外扩（`-2×` 模糊半径）：`blur()` 会在视口边缘采样到透明区，不外扩就露白边
+
+#### ⚠️ 两个真实 bug（都是"计算样式对了但用户看到的不对"）
+
+**① 背景图整个看不见（层被盖住）。**
+最初用 `body::before` + `body { background: {{surface}} }`。断言 `getComputedStyle(...).filter`
+全绿，但画面上什么都没有 —— 因为 **`html` 上有原生设置的不透明白底**（`rgb(255,255,255)`），
+于是 `body` 的背景**不再"上交给画布"**，而是作为普通元素背景在绘制顺序**第 3 步**绘制，
+**晚于**负 z-index 图层的第 2 步 → 把图层整个盖住。
+实测证据：整屏截图的 PNG 只有 **34 字节**的差异（16 万字节里）—— 几乎全被盖住。
+修法：`body` 改透明 + 底色挪进图层自身。
+
+**② 拖动卡顿（~33fps）。**
+两个值原本写在 html 的自定义属性上。实测在 **html 上 `style.setProperty` 写任何自定义属性**
+（哪怕没有任何规则引用它）都会触发**全文档样式重算** —— 本机 2269 个元素 ≈ **23ms/次**。
+修法：改成写真实元素的内联样式（背景图层）/ 消费它的元素自身（侧边栏）→ **0ms**。
+
+量化对照（本机实测，均含强制样式重算 + 布局）：
+
+| 写法 | 每次开销 |
+|---|---|
+| 改 html 上的自定义属性（哪怕没人用） | **23ms** |
+| 改侧边栏元素上的自定义属性 | 3.2ms |
+| 改真实元素的 `style.filter` / `style.inset` | **0ms** |
+| 改侧边栏元素的 `style.backdropFilter` | **0ms** |
+| 改弹窗内任意元素的 `textContent`（数字标签） | **29ms** |
+
+最后一行导致**数字读数不在拖动中实时更新**（只在 `change` 松手时刷新）：
+设置弹窗打开时任何文本改动都会让整篇布局变脏，一次 ~29ms。
+把读数挪到弹窗之外也一样贵（实测 29.1ms）—— 代价来自"弹窗开着时布局本来就贵"，
+不是元素位置问题。拖动中的反馈交给滑块位置 + 背景模糊的实时变化（两项都是 0ms）。
+
+**回归测试**：`scripts/test-tunables.mjs`（**38 项断言**）。除结构/换算/边界/持久化/深浅主题外，
+关键是**像素级**与**性能**两节：
+
+- 像素级：截取整屏 PNG 的字节数做对照。图层显示 vs 隐藏的比值必须 > 1.5
+  （被盖住时会接近 1 —— 正是 bug ① 的特征）；最大模糊后体积必须明显变小。
+  **只断言计算样式是"空跑"的**，这条是踩过坑才加的。
+- 性能：模拟真实拖动路径（派发 `input` 事件 + 强制布局），中位必须 < 20ms。
+
+已反证会真变红：① `body` 恢复不透明底色 → **3 项失败**（比值精确回到 1.00）；
+② 侧边栏模糊退回写 html 自定义属性 → **性能断言失败**（27.9ms）。
+
+### Wallpaper Engine 壁纸集成（2026-09-20，方案 A）
+
+完整可行性分析见 `docs/WE-INTEGRATION.md`。这里是实现要点。
+
+**核心事实**：WorkBuddy 渲染进程本身是 `file://` 页面，**可以直接 `<video src="file:///…">` 播本机文件**
+（实测：`fetch` / `<img>` / GIF / `<video>` 全部成功）。所以**零字节拷贝、零存储、零 payload 膨胀**，
+不碰 localStorage 配额。这是整个方案成立的前提，也是"为什么不需要常驻 HTTP 服务"的答案。
+
+| 模块 | 职责 |
+|---|---|
+| `src/we-library.mjs`（新增） | 只读盘点：定位 Steam 库（多库 `libraryfolders.vdf` + `WORKBUDDY_WE_LIBRARY` 覆盖）→ 解析 `project.json` → 按 `video`/`scene`/`preview` 分类 → 产出 `file://` URL（逐段百分号编码） |
+| `src/injector.mjs` | `applySkin` 内部自动盘点并把目录塞进 payload。⚠️ **必须放这里**：`applySkin` 是所有注入路径的汇合点，只挂在 CLI 上会漏（测试的 `applyLast()` 直接调它） |
+| `src/cli.mjs` | `we`（盘点）/ `we-extract`（解包）命令 |
+| `src/we-extract.mjs`（新增） | 用**内置** RePKG 把 `scene.pkg` 解成原始贴图：按需 + 缓存 + 零依赖读图片头挑主图 |
+| `tools/repkg/RePKG.exe` | 随仓库分发（MIT，NativeAOT 单文件 3.7MB，**不需要 .NET 运行时**） |
+| `src/skin-menu.mjs` | 面板 WE 分组 + 视频图层 + 两处暂停键 + 释放逻辑 |
+
+**分类与可用性**（本机实测 51 条目）：
+
+| WE 类型 | 数量 | 处理 |
+|---|---|---|
+| `video`（mp4/webm 在**工程根目录**，由 `project.json.file` 指向） | 4 | 背景图层挂 `<video loop muted autoplay playsinline>` |
+| `scene`（素材锁在 `scene.pkg`） | 34 | **动效拿不到**（RePKG 不执行着色器）；但可用内置 RePKG 解出**原始 4K 贴图**当静态背景（默认退化为 1K 缩略图） |
+| `preset`（无 `type`，有 `preset`+`dependency`） | 13 | 不是独立壁纸，跳过 |
+
+**行为约定**（主人明确要求）：
+- **默认自动播放**（`muted` 是自动播放的前提）
+- **两处暂停键**：悬浮小图标旁 + 面板里，状态互相同步并落盘（`anonbuddySkinWePaused`）
+- 面板上**必须标注「仅本机可用、不可分享」** —— WE 主题引用本机绝对路径，换机器即死链；
+  创意工坊内容版权归作者，不可再分发（本仓库只存路径、不存字节，天然不会入库）
+
+**⚠️ 三条硬约束**：
+1. **切走必须释放视频**：`pause()` + `removeAttribute("src")` + `load()`。只把节点摘掉解码器可能还在跑
+   （幂等红线）。`leaveWeTheme()` 挂在 `setTheme` / `applyCustomTheme` / `clearTheme` 上。
+2. **面板列表绝不给每个条目塞 `<video>`**：几十个解码器会拖垮渲染进程。缩略图一律用静态 `preview`，
+   并加 `loading="lazy"`。
+3. **背景层有 `<video>` 时 `Page.captureScreenshot` 会卡住**（实测超时）。所以截图类测试
+   （`test-tunables`）必须在无视频状态下跑 —— `test-we` 收尾强制切回普通主题。
+
+**scene 的高清升级**：`npm run we:extract`（或 `apply` 时的后台预热）用内置 RePKG 把贴图解出来，
+只留一张 `hero.png`（平均约 4.6MB/条目）。⚠️ 两条硬约束：
+1. **`-e` 必须写 `tex`** —— pkg 里贴图的原扩展名是 `.tex`，写成 `png` 一张都匹配不到。
+2. **`raw/` 必须 `try/finally` 收掉** + 启动时 `sweepStrayRaw()` —— 中间产物可能上 GB
+   （实测踩过：11 个残留吃掉 2GB）。
+
+**回归测试**：`scripts/test-we.mjs`（**40 项断言**）。覆盖：目录送达与 URL 编码、面板分组与「仅本机」标注、
+静态条目只换背景图、视频条目自动播放 + 循环/静音/inline、两处暂停键互通、切主题释放视频、反复 apply 不叠层。
+已反证：去掉 `leaveWeTheme()` 里的 `releaseBgVideo()` → **2 项失败**（`videoCount` 停在 1）。
+
+### 悬浮图标开关### 悬浮图标开关
+
+`localStorage["anonbuddySkinIconHidden"]`（`"1"`/`"0"`）。隐藏后 `button.style.display = "none"`，
 菜单面板与皮肤照常工作 —— 入口改从设置面板进。**关闭悬浮图标不会关闭皮肤。**
 
 ### 去重（踩过的坑）
@@ -249,7 +391,7 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 
 | 主题 | 浮层底色 | 文字色 | 对比度 |
 |---|---|---|---|
-| miku-488137（浅） | `#e8f3fb` | `rgb(0,0,0)` | 18.68 ✅ |
+| aisu（浅） | `#e8f3fb` | `rgb(0,0,0)` | 18.68 ✅ |
 | genshin-dawn（浅） | `#e9eaf9` | `rgb(0,0,0)` | 17.64 ✅ |
 | wuthering-echo（深） | `#1a1e2a` | `rgb(0,0,0)` | **1.26 ❌** |
 | （顺带发现）次级文字 `rgba(0,0,0,.5)` | 浅底 | — | **3.87 ❌ 本来就不达标** |
@@ -285,6 +427,21 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 | `body` / `html` 的 `light`·`cb-light`·`vscode-light`（或 dark 三件套） | 原生 ThemeManager + 皮肤的 `applyMode()` |
 | `body[data-vscode-theme-kind]` / `[data-vscode-theme-name]` | 同上（**注意 dataset 与 getAttribute 是同一个属性**） |
 | `html[data-theme]` / `html.style.colorScheme` | 同上 |
+
+> ⚠️ **`applyMode()` 必须把这四项全部写全，一个都不能漏**（2026-09-20 踩过）。
+> `data-skin` 只关掉原生的**自动同步**，而原生写这批输出的入口（`ThemeManager.applyTheme`）
+> 见到 `data-skin` 会**提前 return** —— 于是皮肤接管期间**没有任何人**写它。
+> 漏写 `html[data-theme]` 的后果：它停在"皮肤接管前"的旧值，靠它取色的自带 UI
+> 要等下一次 React 重渲染才刷新 → **表现为「切完主题自带外观深浅不对，点一下左下角个人中心才好」**。
+> 同理，凡是"原生会写、我们又接管了"的输出，都要在 `applyMode()` 里补齐。
+
+> ⚠️ **面板配色也要在主题切换时重算**。设置面板的 `--wb-pane-*` 是按「弹窗自身底色」算的，
+> 而弹窗底色会随主题变。原来只在 `openPluginPane()` 里算一次 → 面板开着时切主题，
+> 配色停在打开那一刻（深色弹窗配浅色变量 = 浅字压白底，面板看着像空的）。
+> 现在 `applyMode()` 末尾会调 `refreshPaneChrome()` 重算。
+> ⚠️ 该钩子必须**前置声明成空函数**（`let refreshPaneChrome = () => {}`），
+> 因为 `applyMode` 在初始化阶段就会被调用，而 `syncPaneThemeVars` 定义在后面 ——
+> 直接引用会撞 `const` 的 TDZ。
 
 同时生效就会打架：皮肤是浅色而原生是深色时，foundation 的 `.dark` 选择器
 把深色 token 叠上来，**皮肤 CSS 明明加载了界面却发暗**。
@@ -325,15 +482,21 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 1. `syncAppearance(dark)` —— 在 `applyMode()` 末尾调用（`applyMode` 是**所有**主题切换路径的
    唯一汇合点：`setTheme` / `applyCustomTheme` / `clearTheme`）。依次做四件事：
    ① 打 `data-skin="wb-skin-studio"`；② 写账号维度 key；③ 调原生 `overrideThemeForSkin(mode)`；
-   ④ 同步浅色护栏。
-2. **浅色护栏**（`enforceLightGuard`）三层，缺一不可：
-   - **视觉**：「深色」按钮加 `data-wb-light-lock="1"` + `opacity:.4` + `cursor:not-allowed` + `aria-disabled`
-   - **行为**：捕获阶段监听 `pointerdown`/`click`，`stopImmediatePropagation` 吞掉
+   ④ 上外观护栏。
+2. **外观护栏**（`enforceAppearanceGuard`，2026-09-20 由单向改为**极性化**）三层，缺一不可：
+   护栏锁的**不是固定的深色**，而是「与皮肤相反的那一侧」——
+   `lockedPolarity = 皮肤浅 ? "dark" : "light"`，皮肤卸下（选「原生」）时为 `null`。
+   锁定侧记在 `<html data-wb-appearance-lock="dark|light">`，按钮上记 `data-wb-locked="1"`。
+   为什么深色皮肤也要锁浅色：深底皮肤 + 浅色外观会露出原生浅色底，显示异常。
+   - **视觉**：被锁那一侧的按钮加 `data-wb-locked="1"` + `opacity:.4` + `cursor:not-allowed` + `aria-disabled`
+   - **行为**：捕获阶段监听 `pointerdown`/`click`，`stopImmediatePropagation` 吞掉**被锁侧**的点击
      ⚠️ **不能用 `pointer-events:none` 挡** —— 那样连捕获监听器也收不到事件，就没法区分
      "被禁用"和"点了没反应"；要的是"收得到但吞掉"
      （原生这两个按钮是纯 `<button>`，**没有 disabled 概念**，只能我们拦）
-   - **兜底**：600ms 轮询，若 `data-vscode-theme-kind` 变成 `vscode-dark` 就 `applyMode` 按回去
-     （只在浅色皮肤生效期间；否则会误伤用户自己在原生模式下的选择）
+   - **兜底**：600ms 轮询，若 `data-vscode-theme-kind` 变成**被锁侧**的 kind 就 `applyMode` 按回去
+     （只在皮肤接管期间；否则会误伤用户自己在原生模式下的选择）
+   ⚠️ **初始化时（`skinOwned && activeSurface !== null`）必须带 `skinOwned` 判断**：
+   用户选「原生」时皮肤已卸下，这时再去锁原生外观 = 用户再也切不动它。
 3. **交还控制权**（`releaseAppearanceOwnership`）—— 用户选「原生」时 `clearTheme()` 调用：
    撤 `data-skin`、解护栏、把 DOM 恢复成账号维度 key 里的深浅。
    ⚠️ **顺序必须反着来**：先解除接管再让原生写，否则会被我们的类名盖住。
@@ -341,15 +504,30 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
 4. 浮层按钮是 React portal，**每次打开都是新节点**：除了 600ms 轮询，
    还挂了一个只 `observe(document.body, {childList:true})`（**不 observe subtree**）
    的观察器，浮层一出现立刻刷按钮态，避免"刚打开就操作"的窗口期闪一下未同步状态。
+   （观察器**不**按是否有锁提前 return —— 解锁后浮层再开时也要能把残留禁用态清掉。）
 
-**回归测试**：`scripts/test-appearance-linkage.mjs`（34 项断言）
-覆盖：深色/浅色主题 → 外观跟随、类名无残留、持久化、护栏生效、点击被拦、
-切深色后解禁、外部强改后自动纠回、`data-skin` 契约仍在、**选「原生」后交还控制权**。
-已用"注释掉 `syncAppearance` 调用"的方式验证过它会**真变红**（5 项失败）。
+> **测试专用逃生门**：`__anonbuddySkin.appearance.releaseLock()` 解除护栏（下次 `applyMode` 自动重新上锁）。
+> 用途只有一个：验证「`data-skin` 原生契约」时必须让护栏闭嘴 —— 否则皮肤接管期间任何把外观
+> 改到相反侧的尝试都会被兜底轮询纠正，就分不清"原生没抢写类名"和"我们事后纠回来了"。
 
-> ⚠️ **跨测试干扰（踩过）**：`setTheme` 会顺带改写 `workbuddySkinLastTheme`，
+**回归测试**：`scripts/test-appearance-linkage.mjs`（**50 项断言**）
+覆盖：深色/浅色主题 → 外观跟随、类名无残留、持久化、**两个方向的护栏**（锁深色 / 锁浅色）、
+**点击确实被捕获阶段吞掉**、切主题后护栏反向、**`html[data-theme]` 即时跟随（两个方向）**、
+外部强改后自动纠回（两个方向）、`data-skin` 契约仍在、**选「原生」后交还控制权**。
+已反证会真变红：① 注释掉 `syncAppearance` 调用 → 5 项失败；② 护栏退回单向（永远锁深色）→ 6 项失败；
+③ 注释掉捕获监听器 → 2 项失败；④ 列表退回单列 → `test-settings-panel` 4 项失败；
+⑤ 不写 `html[data-theme]` → 本测试 2 项 + `test-settings-panel` 2 项失败；
+⑥ 不刷新面板配色（`refreshPaneChrome` 空转）→ `test-settings-panel` 3 项失败。
+
+> ⚠️ **「点击被拦」这类断言容易写成空跑**：皮肤接管期间原生本来就被 `data-skin` 挡住，
+> 哪怕完全不拦截外观也不会变。所以测试里在被观测页装了**冒泡阶段探针**：
+> 捕获阶段 `stopImmediatePropagation` 会把事件整条链掐断 → 计数 0；放行时 ≥ 1。
+> ⚠️ 探针必须盯 `pointerdown` 而**不是** `click`：原生浮层在 `pointerdown` 上就关掉了自己，
+> 后续 `click` 根本不会派发（实测恒为 0，拿它做断言等于空跑）。
+
+> ⚠️ **跨测试干扰（踩过）**：`setTheme` 会顺带改写 `anonbuddySkinLastTheme`，
 > 而 `test-theme-switch-perf` 之类用 `applyLast()` 还原 —— 读的正是这个键。
-> 新测试必须**快照并还原** `workbuddySkinLastTheme` 与账号维度 key，否则会把下一个测试的
+> 新测试必须**快照并还原** `anonbuddySkinLastTheme` 与账号维度 key，否则会把下一个测试的
 > "起始主题"改成自己最后切到的那个。
 > （同一个坑也让 `test-theme-switch-perf` 自己的还原断言潜伏失效了很久：
 > 它中途 `setTheme(deepTheme)` 后再 `applyLast()`，还原到的是**自己刚切的**主题。
@@ -372,7 +550,7 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
    React portal（个人中心菜单 / popover / modal）挂在 `<body>` 下，
    `body > *` 这种宽规则会把它们一起弄透明，菜单文字就和背景糊在一起。
 5. **重复 `apply` 必须幂等**。`applySkin` 每次都把整段脚本重新 eval 一遍；
-   脚本开头必须 `copy.stop()` + `dispose()` + `delete window.__workbuddySkin`，
+   脚本开头必须 `copy.stop()` + `dispose()` + `delete window.__anonbuddySkin`，
    且 `dispose()` 要置 `stopped = true`。否则旧实例的 `MutationObserver` + `setInterval` 继续运行，
    表现是"第一次 pause 有效，之后全部失效"。由 `test-reapply-idempotent` 守着。
 
@@ -401,10 +579,10 @@ npm run lint     # 语法解析 + 花括号配平 + 关键实现存在性 + 占�
   ② 制造浮层的测试自己收尾关掉它并断言已关（`test-settings-panel` 的「收尾：设置面板已关闭」）。
   新增会开浮层的测试时，记得把选择器加进 `BLOCKING_OVERLAYS`。
 - **别只还原"界面"，还要还原被你改过的 localStorage 键**。
-  `setTheme` 会顺带写 `workbuddySkinLastTheme`，而不少测试用 `applyLast()` 还原 —— 读的正是这个键。
+  `setTheme` 会顺带写 `anonbuddySkinLastTheme`，而不少测试用 `applyLast()` 还原 —— 读的正是这个键。
   漏了就变成"我最后切到哪，下一个测试就从哪开始"（实测：`test-theme-switch-perf` 报
   `主题已还原到测试开始时的值 -> wuthering-echo vs genshin-dawn`）。
-  做法：测试开头快照相关键（`workbuddySkinLastTheme`、`workbuddy.appearance.mode::*`），
+  做法：测试开头快照相关键（`anonbuddySkinLastTheme`、`workbuddy.appearance.mode::*`），
   收尾**先按已知主题显式还原、再把快照写回**（顺序不能反：还原动作本身会再次改写那个键）。
 - **用户可拖拽/可改的值不要断言具体数值**，断言不变量
   （如"贴边距离跨窗口尺寸保持不变"）。
@@ -467,8 +645,8 @@ node scripts/sel-of.mjs "var(--wb-bg-content)"   # 谁用了这个变量
 
 | 测试 | 现象 | 判断 |
 |---|---|---|
-| `test-window-layout` | 「当前贴边距离与存储的锚点一致」`59 vs dx=21` | 用户 `workbuddySkinMenuPos` 里的锚点与实际渲染位置不一致（历史遗留数据）。**干净树同样失败** |
-| `test-menu-icon` / `test-drag` | `AFTER=null`，`saved=null` | `workbuddySkinMenuPos` 为 `null` 时，拖拽后查询图标元素返回空。**干净树同样失败** |
+| `test-window-layout` | 「当前贴边距离与存储的锚点一致」`59 vs dx=21` | 用户 `anonbuddySkinMenuPos` 里的锚点与实际渲染位置不一致（历史遗留数据）。**干净树同样失败** |
+| `test-menu-icon` / `test-drag` | `AFTER=null`，`saved=null` | `anonbuddySkinMenuPos` 为 `null` 时，拖拽后查询图标元素返回空。**干净树同样失败** |
 
 排查方法：`git stash` → `node apply-now.mjs` → 单跑该测试。
 若干净树也红，就是环境问题；否则才是自己的回归。

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const HOME = os.homedir();
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 
 function dirSize(dir, depth = 0) {
   if (depth > 30) return 0;

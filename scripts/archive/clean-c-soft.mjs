@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 const MANIFEST = `${OUT}/delete-manifest.json`;
 const items = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const log = [];

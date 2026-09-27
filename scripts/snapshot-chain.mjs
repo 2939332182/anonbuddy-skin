@@ -35,8 +35,8 @@ const data = await session.evaluate(`(() => {
   const bar = document.querySelector(".codebuddy-menubar")?.parentElement;
   return {
     viewport: [innerWidth, innerHeight],
-    skinElement: !!document.getElementById("workbuddy-skin-style"),
-    skinLen: (document.getElementById("workbuddy-skin-style")?.textContent || "").length,
+    skinElement: !!document.getElementById("anonbuddy-skin-style"),
+    skinLen: (document.getElementById("anonbuddy-skin-style")?.textContent || "").length,
     chain,
     titlebar: bar ? snap(bar) : null,
   };

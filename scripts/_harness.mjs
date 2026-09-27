@@ -147,7 +147,7 @@ export async function createHarness(options = {}) {
      * 走正常恢复路径：--theme last（注入脚本自己从 localStorage 取用户主题）。
      * 用户主题通常是 custom-*，不在磁盘 themes/ 里，所以不能用 loadTheme 加载。
      */
-    async applyLast({ fallbackId = "miku-488137" } = {}) {
+    async applyLast({ fallbackId = "aisu" } = {}) {
       const menuThemes = await h.loadMenuThemes();
       const fallback = menuThemes.find((t) => t.manifest.id === fallbackId) ?? menuThemes[0];
       return applySkin({
@@ -214,7 +214,7 @@ export async function createHarness(options = {}) {
     /** 记录当前主题 id，供收尾还原时比对 */
     currentThemeId: () =>
       session.evaluate(
-        `document.documentElement.dataset.workbuddySkin ?? null`,
+        `document.documentElement.dataset.anonbuddySkin ?? null`,
       ),
   };
 
@@ -247,9 +247,9 @@ export const probeSkinState = (session) =>
       titleText: h1?.textContent?.trim() ?? null,
       charCount: document.querySelectorAll(".wb-home-header__title span > i").length,
       brandText: brand?.textContent?.trim() ?? null,
-      hasStyle: Boolean(document.getElementById("workbuddy-skin-style")),
-      hasMenu: Boolean(document.getElementById("workbuddy-skin-menu")),
-      hasApi: Boolean(window.__workbuddySkin),
-      themeId: document.documentElement.dataset.workbuddySkin ?? null,
+      hasStyle: Boolean(document.getElementById("anonbuddy-skin-style")),
+      hasMenu: Boolean(document.getElementById("anonbuddy-skin-menu")),
+      hasApi: Boolean(window.__anonbuddySkin),
+      themeId: document.documentElement.dataset.anonbuddySkin ?? null,
     };
   })()`);

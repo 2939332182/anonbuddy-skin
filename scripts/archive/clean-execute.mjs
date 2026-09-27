@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = 'D:/workbuddy-skin-studio/cleanup-audit';
+const OUT = 'D:/anonbuddy-skin/cleanup-audit';
 const QDIR = `${OUT}/_quarantine`;
 const MANIFEST = `${OUT}/delete-manifest.json`;
 const mode = process.argv.includes('--purge') ? 'purge' : 'quarantine';

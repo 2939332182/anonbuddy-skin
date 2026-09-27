@@ -10,10 +10,71 @@ body {
 /* WorkBuddy 的 #root 在部分版本中只负责标题栏，高度只有约 36px。
  * 背景放在 body 才能覆盖整个 renderer 视口，避免 cover 只裁出顶部一条。 */
 body {
-  background:
+  /* ⚠️ 必须是 transparent，**不能**在这里填主题底色（2026-09-20 踩过，代价是背景图整个看不见）：
+   * html 上有原生设置的不透明白底（rgb(255,255,255)）→ body 的背景就**不再上交给画布**，
+   * 而是作为普通元素背景在绘制顺序的**第 3 步**绘制，晚于负 z-index 子层（第 2 步）
+   * → 会把 body::before 的 hero 图层**整个盖住**。
+   * 症状：背景图完全看不见；拖"背景图模糊"滑块也几乎没有视觉变化
+   *      （只有 34/160000 字节的像素差异，因为只有极小一块露出来）。
+   * 所以主题底色挪进 ::before 自己（见下面的 background-color）。 */
+  background: transparent !important;
+}
+
+/* ---- 背景媒体层 ----
+ * hero 图 + 两层遮罩 + 主题底色**全部**放在这一层，它是唯一的背景来源。
+ *
+ * 为什么必须是**真实节点**而不是 body::before：
+ *   拖"背景图模糊"滑块时要实时改模糊量。实测在 html 上 style.setProperty 写**任何**
+ *   自定义属性（哪怕没人用）都会触发**全文档样式重算** —— 本机 2269 个元素约 23ms/次，
+ *   拖起来就是 40fps 的卡顿。而直接写真实元素的 style.filter / style.inset 是 0ms。
+ *   所以这一层由注入脚本创建（id 固定），模糊与扩展量都用内联样式驱动。
+ *   ⚠️ 同理，侧边栏的 --wb-sidebar-blur-px 也**不能**写在 html 上，见下面 [data-view-id=sidebar]。
+ *
+ * 之所以要独立成层：CSS 无法对「元素自身的 background-image」施加 filter: blur()，
+ * 想做「背景图模糊」这个可调节项，就必须让它成为一个可被 filter 的合成层。
+ * （同一层后续也用来承载视频壁纸的 <video>。）
+ *
+ * 层级：z-index:-1 → 落在画布之上、#root 内容之下
+ * （#root 有 position:relative + z-index:0，形成自己的层叠上下文，稳定压在上面）。
+ * inset 由脚本按模糊量反向外扩：blur() 会让边缘采样到透明区，不外扩就在视口四边露白边。
+ */
+#anonbuddy-skin-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* 底色 + 遮罩 + hero 三层：底色在最下，hero 压在上面，遮罩压最上保证文字可读 */
+  background-color: {{surface}};
+  background-image:
     linear-gradient(90deg, color-mix(in srgb, {{surface}} 96%, transparent) 0 22%, transparent 46%),
     linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, {{surface}} 78%, transparent) 78% 100%),
-    url({{hero}}) center center / cover fixed no-repeat !important;
+    url({{hero}});
+  background-position: center center;
+  background-size: auto, auto, cover;
+  background-repeat: no-repeat;
+}
+
+
+/* ---- 背景媒体层 ----
+ * hero 图 + 两层遮罩放在 ::before 上，而不是 body 自己的背景里。
+ * 唯一理由：CSS 没法对「元素自身的 background-image」施加 filter: blur()，
+ * 想做出「背景图模糊」这个可调节项，就必须让它成为一个独立的合成层。
+ * （同一图层后续也用来承载视频壁纸的 <video>，见 README 的 WE 集成说明。）
+ *
+ * 层级：z-index:-1 让它落在 body 底色之上、#root 内容之下
+ * （#root 有 position:relative + z-index:0，会形成自己的层叠上下文，稳定压在上面）。
+ * inset 随模糊量反向外扩：blur() 会让边缘采样到透明区，不外扩就会在视口四边露出白边。
+ */
+
+/* 模糊量为 0 时不挂 filter：blur(0px) 照样会建一层全屏合成层，白付显存。
+ * 渲染层只在换算后 ≥ 0.5px 时才打这个属性（见 applyTunables）。 */
+
+/* ---- 两个可调节项的像素换算 ----
+ * 渲染层用 html.style.setProperty 覆盖这两个值（内联样式优先于这里的声明）。
+ * ⚠️ 必须声明在 :root(html) 上：若声明在 body 上，会压掉从 html 继承来的内联值。 */
+:root {
+  --wb-bg-blur-px: 0px;
+  --wb-sidebar-blur-px: 24px;
 }
 
 body[data-application-name=workbuddy] {
@@ -118,9 +179,9 @@ body:not([data-platform="mac"]):not([data-platform="windows"]) #root {
  * ⚠️ 但浮层（个人中心菜单 / 下拉 / 弹窗 / 右键菜单）也常常是 body 的直接子节点
  * （React portal 默认挂 body），它们**必须**有实底 ——
  * 否则文字会和后面的页面内容糊在一起、难以辨认。所以这里要排除掉。
- * （曾经的写法是裸的 body > :not(#workbuddy-skin-menu)，
+ * （曾经的写法是裸的 body > :not(#anonbuddy-skin-menu)，
  *   把 .user-menu-popover 一起弄透明了，个人中心菜单就糊了。） */
-body > :not(#workbuddy-skin-menu):not([class*="popover"]):not([class*="dropdown"]):not([class*="modal"]):not([class*="dialog"]):not([class*="context-menu"]):not([role="dialog"]):not([role="menu"]):not([role="tooltip"]),
+body > :not(#anonbuddy-skin-menu):not(#anonbuddy-skin-bg):not([class*="popover"]):not([class*="dropdown"]):not([class*="modal"]):not([class*="dialog"]):not([class*="context-menu"]):not([role="dialog"]):not([role="menu"]):not([role="tooltip"]),
 #root > *:not([class*="popover"]):not([class*="dropdown"]):not([class*="modal"]):not([class*="dialog"]):not([class*="context-menu"]):not([role="dialog"]):not([role="menu"]):not([role="tooltip"]) {
   background-color: transparent !important;
 }
@@ -374,7 +435,7 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .logo-workbuddy-tit
  * 为什么用 <i> 而不是给每个字包 <span>：外层已经有 span 了，
  * 再用 span 会让 .wb-home-header__title > span 那条渐变规则失去区分度。
  * ------------------------------------------------------------ */
-@keyframes workbuddy-skin-char-type-in {
+@keyframes anonbuddy-skin-char-type-in {
   from {
     opacity: 0;
     /* 打字机是"从左到右浮现"，字本身只做很小的上浮，不做整行位移 —— 
@@ -398,7 +459,7 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .logo-workbuddy-tit
   background-repeat: no-repeat !important;
   /* 关键：延迟按序号递增 → 从左到右依次出现
    * --wb-char-index 由注入脚本内联下发，缺省按 0 处理（退化成一起出现，不会报错） */
-  animation: workbuddy-skin-char-type-in var(--wb-type-life, .34s) var(--wb-app-swap-ease, cubic-bezier(0.32, 0, 0.24, 1)) both;
+  animation: anonbuddy-skin-char-type-in var(--wb-type-life, .34s) var(--wb-app-swap-ease, cubic-bezier(0.32, 0, 0.24, 1)) both;
   animation-delay: calc(var(--wb-char-index, 0) * var(--wb-type-step, .075s));
   will-change: transform, opacity;
 }
@@ -503,7 +564,7 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .cb-agent-card {
   transition: background-color .12s ease;
 }
 
-/* 「空间 (3)」分组标题与工作区行（workbuddy-skin-studio / work1 / Program Files）
+/* 「空间 (3)」分组标题与工作区行（anonbuddy-skin / work1 / Program Files）
  * 是 position:sticky（分组标题 top:0 z-index:2，工作区行 top:30 z-index:1）。
  * sticky 行必须能遮住滚到它下面的列表项，否则两层文字互相穿透 ——
  * 这就是"空间栏在不同任务窗口之间出现重叠"的成因。
@@ -565,7 +626,12 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-
   background: color-mix(in srgb, var(--wb-accent) 26%, transparent) !important;
 }
 
-/* 侧边栏磨砂玻璃（覆盖上面的 transparent） */
+/* 侧边栏磨砂玻璃（覆盖上面的 transparent）
+ * 24px 只是"脚本尚未接管时"的兜底：真实强度由「侧边栏毛玻璃」调节项驱动，
+ * 脚本把 backdrop-filter 直接写成内联样式（内联优先于这条规则）。
+ * ⚠️ 不要改回"脚本写自定义属性、这里 var() 消费"的写法：实测在 html 上改自定义属性
+ *    会触发全文档样式重算（2269 个元素 ≈ 23ms/次，拖动只剩 ~40fps）；
+ *    即使写在侧边栏元素自身上也要 3.2ms/次；直接写 backdrop-filter 内联是 0ms。 */
 [data-view-id=sidebar] {
   background: color-mix(in srgb, var(--wb-glass) 70%, transparent) !important;
   border-right: 1px solid color-mix(in srgb, var(--wb-accent) 45%, transparent) !important;
@@ -608,4 +674,4 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-
   font: 750 clamp(18px, 2.7vw, 42px)/1.15 ui-rounded, system-ui;
   text-shadow: 0 2px 12px white;
   pointer-events: none;
-}
+}
