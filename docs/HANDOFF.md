@@ -23,11 +23,11 @@
 | 版本 | `1.0.0` |
 | 依赖 | **零运行时依赖**（只用 Node 内置模块），需要 Node 22 |
 | 代码规模 | `src/` 13 个文件 / ~4400 行；`tools/repkg/` 内置 RePKG（MIT，3.7MB）；`scripts/` 55 个 `.mjs` + 7 个 `.ps1`（顶层；另有 `scripts/archive/` 归档） |
-| 内置主题 | 3 个（`wuthering-echo` 深、`genshin-dawn` 浅、`aisu` 浅） |
+| 内置主题 | 5 个（`aisu`、`chunzhi-day`、`chunzhi-night`、`miku-sea`、`summer-moon`，均为浅色） |
 | 测试 | **20 个 e2e（390 项断言）+ 4 个静态检查**（其中 3 个共 36 项断言，`lint-menu` 只报 OK） |
 | 当前测试结果 | `npm run test:all` = **20/20 PASS**；`npm run test:static` = 4/4 PASS |
 | 提交数 | 21 个；**本地领先 `origin/main` 13 个提交（未推送）** |
-| 远程 | `https://github.com/cdredfox/anonbuddy-skin.git` |
+| 远程 | `https://github.com/2939332182/anonbuddy-skin.git`（git 需走代理 127.0.0.1:7897） |
 
 > ⚠️ 远程当前访问返回 **502**，`gh` CLI **未安装** —— 推送前先确认网络与凭据。
 
