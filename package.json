@@ -37,7 +37,7 @@
     "test:menu": "node scripts/run-tests.mjs --suite menu",
     "test:all": "node scripts/run-tests.mjs --suite all",
     "test:list": "node scripts/run-tests.mjs --list",
-    "find": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find-workbuddy.ps1",
+    "find": "node scripts/find-workbuddy.mjs",
     "shot": "node scripts/shot-home.mjs",
     "we:extract": "node src/cli.mjs we-extract"
   }

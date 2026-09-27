@@ -137,14 +137,19 @@ node src/cli.mjs we-extract           # 解出场景壁纸的原始贴图
 
 指定端口换另一个版本：`node src/cli.mjs apply --port 9334`。
 
-从源码跑 PowerShell 脚本：
+从源码跑：
 
 ```powershell
-.\scripts\launch-and-skin.ps1              # 启动 + 注入，一步到位
-.\scripts\launch-and-skin.ps1 -Prefer cn   # 两个版本都装着时，挑国内版
-.\scripts\apply.ps1                        # WorkBuddy 已经带端口开着时，只注入
-.\scripts\apply.ps1 -Theme chunzhi-night   # 指定主题
-.\scripts\find-workbuddy.ps1               # 找不到 WorkBuddy 时先跑这个
+node scripts\launch-and-skin.mjs              # 启动 + 注入，一步到位
+node scripts\launch-and-skin.mjs --prefer cn  # 两个版本都装着时，挑国内版
+node scripts\find-workbuddy.mjs               # 找不到 WorkBuddy 时先跑这个
+```
+
+`launch-and-skin.mjs` 只在应用**没带着调试端口**跑的时候才需要；已经带端口开着的话，直接注入就行：
+
+```powershell
+node src\cli.mjs apply
+node src\cli.mjs apply --theme chunzhi-night
 ```
 
 装在奇怪地方（既不在 Program Files 也不在 LocalAppData）就设一次环境变量，一劳永逸：
@@ -177,7 +182,7 @@ node src/cli.mjs we-extract           # 解出场景壁纸的原始贴图
 
 **重启后皮肤没了** — 故意的。注入的生命周期跟着渲染进程走，进程换了就没了，重跑 apply 就行。
 
-**找不到 WorkBuddy** — `.\scripts\find-workbuddy.ps1` 会列出它试过的所有路径和命中的那一个。它也会读注册表里的安装位置，所以换盘重装一般不用管。
+**找不到 WorkBuddy** — `node scripts\find-workbuddy.mjs` 会列出它试过的所有候选路径和命中的那一个。它也会读注册表里的安装位置，所以换盘重装一般不用管。
 
 **壁纸列表是空的** — 先确认 Wallpaper Engine 里有订阅。实在没有，用面板上的「手动目录」挑个文件夹也行。
 
@@ -194,7 +199,7 @@ npm run test:all      # 全跑一遍
 
 `node scripts/run-tests.mjs --list` 能看到每个套件管什么。
 
-打包：`python packaging/build-package.py`，默认出 cn 和 intl 两个包，`--edition cn` 只出一个。
+打包：`node packaging/build-package.mjs`，默认出 cn 和 intl 两个包，`--edition cn` 只出一个。打包器自带反斜杠自检（1.0.0 那版就是栽在这上面），写完会读回中央目录核对一遍。
 
 仓库里还有个 `scripts/make-skin-from-we.mjs`，能从任意 Wallpaper Engine 条目一键搓出主题 —— 解码、抽帧、取色全在渲染进程里做，不依赖 ffmpeg 也不依赖 sharp。
 

@@ -71,32 +71,30 @@ so you theme the one the user meant.
 
 ## Workflow
 
-1. From the repo directory, run in **PowerShell** (not cmd). If WorkBuddy is not
-   already running *with* the CDP port, use the one-step launcher:
+1. From the repo directory. If WorkBuddy is not already running *with* the CDP
+   port, use the one-step launcher (plain Node — no PowerShell, no execution
+   policy involved):
 
    ```powershell
    # launch with CDP + inject, one step
-   .\scripts\launch-and-skin.ps1
+   node scripts\launch-and-skin.mjs
 
    # both product lines installed? pick the one the user wants
-   .\scripts\launch-and-skin.ps1 -Prefer cn
+   node scripts\launch-and-skin.mjs --prefer cn
    ```
 
-   If it is already running with the port, `apply.ps1` alone is enough:
+   If it is already running with the port, the CLI alone is enough:
 
    ```powershell
-   .\scripts\apply.ps1
-   .\scripts\apply.ps1 -Theme chunzhi-night
+   node src\cli.mjs apply
+   node src\cli.mjs apply --theme chunzhi-night
    ```
-
-   If you hit an execution-policy error, run once:
-   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry.
-2. If the launcher cannot locate WorkBuddy, run the locator and follow its
-   printed hint — it lists every path it tried and reads the registry, so a
-   drive change or reinstall is usually handled automatically:
+2. If the launcher cannot locate WorkBuddy, run the locator — it prints every
+   candidate it tried and reads the registry, so a drive change or reinstall is
+   usually handled automatically:
 
    ```powershell
-   .\scripts\find-workbuddy.ps1
+   node scripts\find-workbuddy.mjs
    ```
 
    If WorkBuddy lives somewhere unusual, set the env var once instead of passing
@@ -165,7 +163,7 @@ user what will change before running it for real.
 ## Pause / restore to native
 
 ```powershell
-.\scripts\pause.ps1
+node src\cli.mjs pause
 ```
 
 This removes the injected skin and relaunches WorkBuddy normally. The official
@@ -216,12 +214,19 @@ node --check src/cli.mjs  # syntax
   plus `customThemes()` / `aliases()` inspectors.
 - `src/injector.mjs` — idempotent CSS+menu injection and removal.
 - `src/constants.mjs`, `src/theme-schema.mjs`, `src/theme-store.mjs` — config & theme model.
-- `scripts/launch-and-skin.ps1` — start WorkBuddy with CDP + inject, in one step.
-- `scripts/apply.ps1` / `pause.ps1` / `find-workbuddy.ps1` — inject / remove / locate.
+- `scripts/launch-and-skin.mjs` — start WorkBuddy with CDP + inject, in one step (Node).
+- `scripts/find-workbuddy.mjs` — print every candidate path it tried, plus the hit.
+- `src/platform/workbuddy-path.mjs` — the single source of truth for locating the app,
+  its bundled Node and the per-edition port (reads the registry via `reg.exe`).
 - `scripts/setup-autoskin.ps1` + `autoskin-launch.vbs` — bind launch entries for auto-start.
+  These two stay PowerShell/VBScript on purpose: they drive the `WScript.Shell` COM
+  interface to rewrite `.lnk` shortcuts, which Node has no equivalent for, and a `.vbs`
+  is the only way to start a child process without a console window flashing.
+- `scripts/workbuddy-path.ps1` — only dot-sourced by `setup-autoskin.ps1`; the Node
+  module above is the real entry point.
 - `scripts/watch-targets.mjs` — re-inject windows opened later (Settings is its own window in 5.6.x).
 - `themes/` — built-in theme folders (`theme.json` + `hero.webp`).
-- `packaging/build-package.py` — builds the `-cn` / `-intl` release zips.
+- `packaging/build-package.mjs` — builds the `-cn` / `-intl` release zips (Node only, no Python).
 - `README.md` — full human-readable documentation.
 
 ## One-line summary for the user

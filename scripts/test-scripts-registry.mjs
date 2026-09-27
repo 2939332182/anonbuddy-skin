@@ -48,7 +48,7 @@ const SOURCES = [
   "src/theme-schema.mjs", "src/skin-css.mjs", "src/skin-menu.mjs", "src/css-loader.mjs",
   "src/asar-path.mjs", "src/constants.mjs",
   "scripts/run-tests.mjs", "scripts/_harness.mjs", "scripts/asar-find.mjs", "scripts/sel-of.mjs",
-  "apply-now.mjs", "apply-ai.sh",
+  "apply-now.mjs",
 ];
 const HARDCODED = /["'`](?:[A-Za-z]:[\\/]{1,2}(?:Users|workbuudy|workbuddy|Program Files)[^"'`]*|\/(?:Users|home)\/[A-Za-z0-9._-]+\/[^"'`]*)["'`]|=\s*["']\/[a-z]\/[^"']*["']/g;
 const pathViolations = [];

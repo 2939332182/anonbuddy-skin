@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+// 带调试端口启动 WorkBuddy 并注入皮肤 —— 一条命令搞定
+//
+// 移植自 scripts/launch-and-skin.ps1。背景：皮肤活在渲染进程里，重启就没了；
+// 而双击 WorkBuddy.exe 的默认启动**不带** --remote-debugging-port，注入器没有
+// 端点可连，看起来就是"没皮肤"（其实什么都没坏）。这个脚本补上这段：
+// 带端口拉起来 → 等渲染进程 → 注入。
+//
+// 用法：
+//   node scripts/launch-and-skin.mjs                 自动识别版本
+//   node scripts/launch-and-skin.mjs --prefer cn     两个版本都装着时挑国内版
+//   node scripts/launch-and-skin.mjs --port 9334     显式指定端口
+//   node scripts/launch-and-skin.mjs --no-watch      不常驻补注入进程
+//   node scripts/launch-and-skin.mjs --no-restart    发现裸启动实例时直接报错
+
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { findNode, findWorkBuddyExe, portForExe, processNameFor } from "../src/platform/workbuddy-path.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function parseArgs(argv) {
+  const args = { exe: "", prefer: "", port: 0, theme: "last", watch: true, restart: true, timeout: 300 };
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === "--exe") args.exe = argv[++i] ?? "";
+    else if (a === "--prefer") args.prefer = argv[++i] ?? "";
+    else if (a === "--port") args.port = Number(argv[++i] ?? 0);
+    else if (a === "--theme") args.theme = argv[++i] ?? "last";
+    else if (a === "--timeout") args.timeout = Number(argv[++i] ?? 300);
+    else if (a === "--no-watch") args.watch = false;
+    else if (a === "--no-restart") args.restart = false;
+    else if (a === "--help" || a === "-h") args.help = true;
+    else throw new Error(`无法识别的参数：${a}`);
+  }
+  return args;
+}
+
+/** 这个进程名在跑吗？WorkBuddy 有进程保护，只能用 tasklist 看名字。 */
+function isRunning(procName) {
+  try {
+    const out = execFileSync("tasklist.exe", ["/FI", `IMAGENAME eq ${procName}.exe`, "/FO", "CSV", "/NH"], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+    });
+    return new RegExp(`"${procName}\\.exe"`, "i").test(out);
+  } catch {
+    // tasklist 失败时保守地当作"在跑"，免得误杀用户正在用的实例
+    return true;
+  }
+}
+
+async function cdpReady(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
+    const targets = await res.json();
+    return targets.some((t) => t.type === "page" && String(t.url).includes("renderer/index.html"));
+  } catch {
+    return false;
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForCdp(port, seconds) {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    if (await cdpReady(port)) return true;
+    await sleep(500);
+  }
+  return false;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(`用法: node scripts/launch-and-skin.mjs [选项]
+
+  --prefer cn|intl   两个版本都装时挑一个
+  --exe <路径>       直接指定主程序
+  --port <端口>      默认按版本推（国内 9334 / 国际 9333）
+  --theme <主题名>   默认 last（恢复菜单里最后选的那个）
+  --timeout <秒>     等渲染进程的上限，默认 300
+  --no-watch         不启动补注入进程
+  --no-restart       发现裸启动实例时直接报错，不等用户
+  --help             显示本帮助`);
+    return;
+  }
+
+  // --- 1. 定目标 ----------------------------------------------------------
+  const exe = findWorkBuddyExe({ extra: args.exe, prefer: args.prefer });
+  if (!exe || !existsSync(exe)) {
+    console.error("找不到 WorkBuddy 主程序。用 --exe <路径> 指定，或设 WORKBUDDY_EXE 环境变量。");
+    process.exitCode = 1;
+    return;
+  }
+  const port = args.port || portForExe(exe);
+  const procName = processNameFor(exe);
+  console.log(`WorkBuddy : ${exe}`);
+  console.log(`Process   : ${procName}.exe`);
+  console.log(`CDP port  : ${port}`);
+
+  const node = findNode();
+  if (!node) {
+    console.error("找不到 node。装一个 Node.js 20+，或先把 WorkBuddy 启动一次让它把自己那份解出来。");
+    process.exitCode = 1;
+    return;
+  }
+
+  // --- 2. 确保它带着端口跑着 ----------------------------------------------
+  if (await cdpReady(port)) {
+    console.log(`CDP 已经在 ${port} 上 - 直接注入。`);
+  } else {
+    if (isRunning(procName)) {
+      // 我们没法自己结束它：进程带保护，Stop-Process / taskkill /F / CIM Terminate
+      // 全部被拒（Access is denied），连 GetOwner 都不给。CloseMainWindow 能用，
+      // 但应用把 WM_CLOSE 当"收进托盘"，进程照活。所以只能请用户自己退。
+      console.log("");
+      console.log(`  ${procName}.exe 正在运行，但没有 --remote-debugging-port=${port}，`);
+      console.log("  注入器没有端点可连。");
+      console.log("");
+      console.log("  请右键托盘图标选「退出」把它关掉。");
+      console.log("  （点窗口右上角的 X 只会缩到托盘，不算退出。）");
+      console.log("");
+      if (!args.restart) {
+        console.error("--no-restart 已指定，不再等待。");
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`  最多等 ${args.timeout} 秒...`);
+      const deadline = Date.now() + args.timeout * 1000;
+      while (Date.now() < deadline) {
+        if (!isRunning(procName)) break;
+        await sleep(800);
+      }
+      if (isRunning(procName)) {
+        console.error(`等了 ${args.timeout} 秒还在跑。什么都没动过 —— 关掉之后再跑一次即可。`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log("  已退出，继续。");
+    }
+
+    console.log(`启动 ${procName}.exe --remote-debugging-port=${port} ...`);
+    // detached：父进程退出（比如从 .bat 里调用）不能把 WorkBuddy 一起带走
+    spawn(exe, [`--remote-debugging-port=${port}`], { detached: true, stdio: "ignore" }).unref();
+
+    if (!(await waitForCdp(port, args.timeout))) {
+      console.error(`${args.timeout} 秒内没等到渲染进程。应用可能还在启动 —— 稍后重跑 apply 即可。`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log("渲染进程就绪。");
+  }
+
+  // --- 3. 注入 ------------------------------------------------------------
+  const cli = join(ROOT, "src", "cli.mjs");
+  console.log(`应用主题 '${args.theme}' ...`);
+  execFileSync(node, [cli, "apply", "--port", String(port), "--theme", args.theme], {
+    stdio: "inherit",
+    cwd: ROOT,
+  });
+  console.log("完成。去 WorkBuddy 右上角找那颗浮动按钮。");
+
+  // --- 4. 盯着后开的窗口 --------------------------------------------------
+  // 5.6.x 起设置是独立 renderer 窗口，在我们注入之后才创建，新窗口是没皮肤的，
+  // 设置页里也就看不到换肤入口。watch-targets.mjs 轮询 CDP，发现新窗口就补一次。
+  // 代价是一个常驻 Node 进程（约 40 MB）—— 不想要就加 --no-watch。
+  if (args.watch) {
+    const watcher = join(ROOT, "scripts", "watch-targets.mjs");
+    if (existsSync(watcher)) {
+      const already = listWatchers().some((line) => line.includes("watch-targets.mjs") && line.includes(String(port)));
+      if (already) {
+        console.log(`端口 ${port} 的补注入进程已经在跑了。`);
+      } else {
+        spawn(node, [watcher, String(port)], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+        console.log("补注入进程已启动：后开的窗口会自动带上皮肤。");
+      }
+    }
+  }
+}
+
+/** 找已经在跑的 watcher，避免每点一次启动器就多堆一个进程 */
+function listWatchers() {
+  try {
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object -ExpandProperty CommandLine",
+      ],
+      { encoding: "utf8", timeout: 10000, windowsHide: true },
+    );
+    return out.split(/\r?\n/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+main().catch((error) => {
+  console.error(`启动失败：${error.message}`);
+  process.exitCode = 1;
+});
