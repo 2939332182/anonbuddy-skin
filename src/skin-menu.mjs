@@ -922,10 +922,17 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
   })();
 
   const applyVolume = () => {
-    if (!bgVideo) return;
+    // 用 DOM 兜底，不只认 bgVideo 这个引用：
+    // 切换主题/重建视频的时序里，bgVideo 可能已经和图层里的真实元素脱钩
+    // （实测：拖音量时 localStorage 正确写入、muted 也跟着变，唯独 volume 停在 0
+    //   —— 说明写到了一个不再是当前画面的节点上）。以 DOM 里的元素为准最稳。
+    const el = bgVideo && bgVideo.isConnected
+      ? bgVideo
+      : document.querySelector("#" + BG_LAYER_ID + " > video");
+    if (!el) return;
     try {
-      bgVideo.volume = Math.min(1, Math.max(0, weVolume / 100));
-      bgVideo.muted = !weSound;
+      el.volume = Math.min(1, Math.max(0, weVolume / 100));
+      el.muted = !weSound;
     } catch (error) {}
   };
 

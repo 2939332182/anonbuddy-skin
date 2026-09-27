@@ -87,17 +87,44 @@ export const readImageSize = async (file) => {
 };
 
 /**
- * 从解包产物里挑"最像主图"的那张。
- * 判据：面积最大 + 宽屏优先；并用「字节数 / 像素数」剔除近似纯色的贴图
- * （纯色 PNG 压得极小，比色丰富的图小一两个数量级 —— 不用解码像素就能判）。
+ * 非画面主体的图层。这些是场景里的遮罩、特效、音频条、水印、赞助二维码之类，
+ * 面积经常比真正的画面还大 —— 只按体积挑图会挑中它们（实测：某个场景挑出 256×256
+ * 的缩略图、另一个挑出 3157×3516 的方形立绘，都不是 16:9 的画面）。
+ * 关键词参考同类实现的过滤思路，按"路径里出现即可疑"处理。
  */
-export const pickBestTexture = async (files) => {
+const HELPER_TOKENS = [
+  "masks", "_mask", "mask", "flow", "noise", "lut", "distort", "warp", "vortex",
+  "glow", "neon", "waterripple", "foliagesway", "cursorripple", "audio", "logo",
+  "watermark", "sponsor", "donate", "qrcode", "font", "text_", "particle",
+  "lightmap", "light_map", "util", "blend", "flare",
+];
+
+/** 低于这个尺寸的多半是缩略图 / 图标，不是拿来铺满屏幕的图。 */
+const MIN_BASE_WIDTH = 1280;
+const MIN_BASE_HEIGHT = 720;
+
+/**
+ * 从解包产物里挑"最像画面主体"的那张。
+ *
+ * 判据（按优先级）：
+ *   1. 排除辅助图层（HELPER_TOKENS）与过小的图 —— 它们不是画面
+ *   2. 宽高比命中目标比例（默认 16:9，容差 ±8%）的候选里，取面积最大
+ *   3. 没有命中比例的，按「比例接近度优先、面积次之」排
+ * 用「字节数 / 像素数」剔除近似纯色的贴图（纯色 PNG 压得极小，不用解码像素就能判）。
+ */
+export const pickBestTexture = async (files, options = {}) => {
+  const target = Number.isFinite(options.targetAspect) && options.targetAspect > 0
+    ? options.targetAspect
+    : 16 / 9;
   const scored = [];
   for (const file of files) {
     const ext = file.slice(file.lastIndexOf(".")).toLowerCase();
     if (!IMAGE_EXT.has(ext)) continue;
+    const lower = file.toLowerCase().replace(/\\/g, "/");
+    if (HELPER_TOKENS.some((token) => lower.includes(token))) continue;
     const size = await readImageSize(file);
     if (!size || !size.width || !size.height) continue;
+    if (size.width < MIN_BASE_WIDTH && size.height < MIN_BASE_HEIGHT) continue;
     const bytes = (await stat(file)).size;
     const pixels = size.width * size.height;
     const richness = bytes / pixels;           // 字节/像素：越低越可能是纯色/近纯色
@@ -107,13 +134,29 @@ export const pickBestTexture = async (files) => {
       bytes,
       area: pixels,
       richness,
+      aspect: size.width / size.height,
       landscape: size.width >= size.height,
       // 主图偏好：面积大、宽屏、且不是纯色
       score: pixels * (size.width >= size.height ? 1 : 0.25) * (richness > 0.02 ? 1 : 0.05),
     });
   }
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0] ?? null;
+  if (scored.length === 0) return null;
+
+  const tolerance = target * 0.08;
+  const onRatio = scored
+    .filter((item) => Math.abs(item.aspect - target) <= tolerance)
+    .sort((a, b) => b.area - a.area);
+  if (onRatio.length > 0) return { ...onRatio[0], reason: "aspect-match" };
+
+  // 没有正好是目标比例的：比例接近度优先，但差距在 0.15 以内时改按面积决胜 ——
+  // 否则会出现「3157×3516 换成 746×731」这种比例略近、分辨率暴跌的结果。
+  const byAspect = [...scored].sort((a, b) => {
+    const da = Math.abs(a.aspect - target);
+    const db = Math.abs(b.aspect - target);
+    if (Math.abs(da - db) > 0.15) return da - db;
+    return b.area - a.area;
+  });
+  return { ...byAspect[0], reason: "nearest-aspect" };
 };
 
 /** 跑一次 RePKG 解包。用 execFile（不经 shell），参数是数组，避免注入与转义问题。 */
