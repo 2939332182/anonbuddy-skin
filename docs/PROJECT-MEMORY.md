@@ -1,6 +1,6 @@
 # 项目记忆 · AnonBuddy Skin
 
-> 给接手维护的人或 AI 看。截至 commit `d80b75e` / v1.0.3（2026-09-29）。
+> 给接手维护的人或 AI 看。截至 commit `ee9a6b0` / v1.0.4（2026-09-29）。
 > 更早的历史文档在 `docs/HANDOFF.md`、`docs/HANDOVER-FOR-AGENT.md`、`docs/ARCHITECTURE.md` —— 那些描述的是重构前的形态，读的时候注意时效。
 
 ## 这是什么
@@ -176,6 +176,7 @@ Release 说明的写法参考：面向下载者，不写代码结构。参考同
 
 | tag | 附件 |
 |:---|:---|
+| v1.0.4 | `chihayaanon-skin-1.0.4-cn.zip` / `-intl.zip`（一键换肤顺手接好启动入口，用户零额外步骤） |
 | v1.0.3 | `chihayaanon-skin-1.0.3-cn.zip` / `-intl.zip`（事件驱动首屏注入 + 状态文档 + 换肤事务） |
 | v1.0.2 | `chihayaanon-skin-1.0.2-cn.zip` / `-intl.zip` |
 | v1.0.1 | `chihayaanon-skin-1.0.1-cn.zip` / `-intl.zip` |
