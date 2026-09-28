@@ -8,7 +8,7 @@
 给 WorkBuddy 桌面端（腾讯的 AI 办公客户端）换肤的工具。原理：用 `--remote-debugging-port` 把 WorkBuddy 拉起来，通过本机 CDP 连上它的渲染进程，注入一份 CSS 和一段脚本。**不改 `app.asar`、不改安装目录、不改签名**，效果只活在渲染进程里，进程一换就没了。
 
 仓库：https://github.com/2939332182/anonbuddy-skin
-当前版本：**1.0.2**，工作区在 `D:\workbuddy-skin-studio`
+当前版本：**1.0.4**，工作区在 `D:\workbuddy-skin-studio`
 
 ## 先记住这几条硬约束
 
@@ -55,6 +55,7 @@
 | `themes/<id>/` | 内置主题，每个是 `theme.json` + `hero.webp` |
 | `scripts/test-*.mjs` | 23 个 e2e 测试 |
 | `scripts/probe-*.mjs` / `shot-*.mjs` | 调试探针，一次性排查用，不是运行时依赖 |
+| `scripts/desk-snapshot.mjs` | 桌面快照/对比：跑包前后各来一次，回答"这包在桌面留了什么" |
 | `packaging/build-package.mjs` | 打包入口 |
 | `packaging/zip.mjs` | 自己实现的 ZIP 写入器 |
 | `tools/repkg/RePKG.exe` | 解场景壁纸，MIT，随仓库分发 |
@@ -96,13 +97,23 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 
 包名规则 `chihayaanon-skin-<版本>-<cn|intl>.zip`，两个包插件代码相同，只有启动器预设的主程序名和端口不同。
 
-## 这一轮维护做过什么
+## 维护史
 
-三个 commit，都在 2026-09-27/28：
+**2026-09-27/28（到 v1.0.2 为止）**
 
 - `83e9547` **收缩为 Windows 专用** —— 删掉 `.command` 启动器和 `apply-ai.sh`，README/SKILL 去掉 macOS 分支
 - `9547f56` **四批重构** —— 删 118 KB 死代码（`scripts/archive/`）→ Python 打包器换成 Node → 拆 `skin-menu.mjs`（2752 行 → `src/inject/` 11 个分片）→ PowerShell 从 10 个收敛到 2 个
 - `cf0ea35` **README 强调易用性 + 发布 1.0.2**
+
+**2026-09-29（v1.0.3 → v1.0.4）** —— 起因只是"打开 WorkBuddy 皮肤没加载"，一路挖出**四个真实故障 + 三项架构改造**。下面「踩过的坑」里 2026-09-29 那几条全出自这一轮。
+
+- `d80b75e` **1.0.3：三项改造**
+  - **① 事件驱动首屏注入** —— 新增 `src/skin-guard.mjs` + `scripts/skin-guard.mjs`：连 CDP browser 端点做 `Target.setAutoAttach({waitForDebuggerOnStart:true})`，新渲染进程**一出生就被暂停**，趁暂停期把脚本注册到文档创建点再放行 → 设置窗口首屏即带皮肤，没有轮询延迟、不需要反复 spawn 子进程。取代了 2 秒轮询的 `watch-targets.mjs`（保留作回退，`--no-watch` 两条都不起）。`src/cdp-client.mjs` 相应急扩：事件订阅、`sessionId` 路由、browser 端点发现、`onClose` 回调
+  - **② 外部状态文档** —— 新增 `src/active-state.mjs`，把"当前皮肤"记到 `%LOCALAPPDATA%\AnonBuddySkin\state.json`（`mkdtemp` + `flag:'wx'` + `rename` 原子写）。渲染进程经 `Runtime.addBinding` 实时回写，注入器读它作兜底（优先级仍是 localStorage > 文档，见 `09-tunables-icon.js` 的 `hintOk`）
+  - **③ 换肤事务** —— `commitTheme`（`src/inject/05-theme-memory.js`）：先拍快照 → 落地 → 任一步抛错按相反顺序回滚。三条切换路径 `setTheme` / `clearTheme` / `applyCustomTheme` 全部接入，自定义主题的 CSS 合成也提到事务外先算
+  - 同时修的四个故障：**自动更新吃端口**、**国内版打不开**（快捷方式参数拼写）、**设置窗口漏注入**（错过首次导航）、**标题文案卡死**（rAF 在隐藏页面不执行）
+- `7dda199` **1.0.3 补** —— `--prefer` 命中不了时明确警告（它是软偏好，会静默退回另一版，便携版用户必踩）；新增 `scripts/desk-snapshot.mjs`
+- `ee9a6b0` **1.0.4** —— `launch-and-skin.mjs` 新增 `--setup` / `--no-setup`；包内「一键换肤.bat」默认带上它，**注入成功后自动接好桌面图标 / 开始菜单 / 开机自启**，用户双击一次即完整体验
 
 更早一次（`e8eb330` 之前）还修过一个换盘遗留问题：`WORKBUDDY_EXE` 环境变量指向已卸载的旧盘，导致 Node 侧的路径解析全挂。现在路径解析会读注册表卸载项的 `DisplayIcon`，环境变量坏掉也能自愈。
 
@@ -163,12 +174,41 @@ cd D:\workbuddy-skin-studio
 # 1. 改 package.json 的 version
 # 2. 打包
 node packaging/build-package.mjs
-# 3. 提交 + 打标签 + 推送
+# 3. 提交 + 打标签 + 推送（推送方式看代理当前状态，见「已知限制」那条）
 git add -A; git commit -m "chore: 发布 x.y.z"
 git tag -a vX.Y.Z -m 'vX.Y.Z'
-git push origin main; git push origin vX.Y.Z
-# 4. 建 Release 并传两个附件（用 git credential 里的 token）
+git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main
+git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin vX.Y.Z
+# 4. 建 Release 并传两个附件（脚本见下）
 ```
+
+**⚠️ 两个必踩的坑，都在 2026-09-29 实发过一次：**
+
+1. **Release 说明必须用 UTF-8 字节发送。** 直接把字符串丢给 `Invoke-RestMethod` 时它不按 UTF-8 编码，中文会整篇变成 `?????`（v1.0.3 第一版说明就这么废了，只能 PATCH 重发）。
+
+   ```powershell
+   $json  = @{ tag_name = "vX.Y.Z"; name = "X.Y.Z"; body = $notes; draft = $false } | ConvertTo-Json -Depth 4
+   $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+   Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/2939332182/anonbuddy-skin/releases" `
+     -Headers $h -Body $bytes -ContentType "application/json; charset=utf-8"
+   ```
+
+   取 token（在 git credential 里，`gho_` 前缀 40 字符，有 repo 权限）：
+
+   ```powershell
+   $cred  = ("protocol=https`nhost=github.com`n" | git credential fill) 2>$null
+   $token = ($cred | Select-String '^password=').Line -replace '^password=', ''
+   $h = @{ Authorization = "Bearer $token"; Accept = "application/vnd.github+json"; "User-Agent" = "anonbuddy-skin" }
+   ```
+
+2. **附件一旦传错，要删掉重传**（同名附件不能覆盖，会 422）。列出现有的：
+
+   ```powershell
+   $rel = Invoke-RestMethod -Uri ".../releases/tags/vX.Y.Z" -Headers $h
+   $rel.assets | ForEach-Object { Invoke-RestMethod -Method Delete -Uri ".../releases/assets/$($_.id)" -Headers $h }
+   ```
+
+   上传记得走 `uploads.github.com`：`.../releases/$($rel.id)/assets?name=<文件名>`，`-ContentType application/zip`。
 
 Release 说明的写法参考：面向下载者，不写代码结构。参考同类项目的语气——`WJZ-P/sona`（写用户能感知的结果）、`BetterNCM-Installer`（极简）、`MomoTalkNTQQ-Theme`（口语化）。
 
