@@ -1,6 +1,6 @@
 # 项目记忆 · AnonBuddy Skin
 
-> 给接手维护的人或 AI 看。截至 commit `cf0ea35` / v1.0.2（2026-09-28）。
+> 给接手维护的人或 AI 看。截至 commit `d80b75e` / v1.0.3（2026-09-29）。
 > 更早的历史文档在 `docs/HANDOFF.md`、`docs/HANDOVER-FOR-AGENT.md`、`docs/ARCHITECTURE.md` —— 那些描述的是重构前的形态，读的时候注意时效。
 
 ## 这是什么
@@ -146,13 +146,14 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 - **保留的 3 个非 Node 脚本**是有理由的，别顺手删：`setup-autoskin.ps1` + `workbuddy-path.ps1` 要驱动 `WScript.Shell` COM 改写 `.lnk`（Node 没有对等接口）；`autoskin-launch.vbs` 是唯一能让快捷方式启动子进程不闪控制台窗口的手段。
 - **`scripts/` 里还有 20 多个探针脚本**（`probe-*` / `shot-*` / `check-*`）。它们是排查工具不是运行时依赖，没有进发布包。要清理的话先确认 `test-scripts-registry.mjs` 还过。
 - **`docs/` 里的历史数据不要删。** `ARCHITECTURE.md` 里有针对已移除主题的对比度实测、macOS 时代的 `MENUBAR_HEIGHT` 讨论——那是解释"为什么这么修"的历史记录。
-- **代理时有时无，别被它卡住。** 这台机器上 `127.0.0.1:7897` 的代理会停。停了以后 `git push` 会报 `Failed to connect to github.com:443 over proxy 127.0.0.1` —— 这时候直接绕过代理推：
+- **代理时有时无，别被它卡住，也别把任何一条当永久事实。** 两种状态都实测出现过：
+  - 2026-09-29 发 1.0.3 时**直连被 RST**（`Empty reply from server` / `Recv failure: Connection was reset`），必须**走代理**：
+    ```bash
+    git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main
+    ```
+  - 更早一次则是反过来的：代理停着，`git push` 报 `Failed to connect to github.com:443 over proxy 127.0.0.1`，那时去掉 `-c` 参数直连即可。
 
-  ```bash
-  git -c http.proxy= -c https.proxy= push origin main
-  ```
-
-  仓库级原本配了 `http.proxy`，已经摘掉了（直连能走通）。如果哪天直连被 RST 了再把代理配回去。
+  所以别照抄某一次的命令，先看 `127.0.0.1:7897` 有没有在监听、以及报错是"连不上代理"还是"被对端 RST"，再决定走哪边。
 - **发布用的 token 在 git credential 里**（`gho_` 前缀，40 字符，有 repo 权限）。创建 Release 和上传附件走 `api.github.com` + `uploads.github.com`，`Invoke-RestMethod` 默认走系统代理；代理停着也能直连。
 
 ## 发布流程（照抄即可）
@@ -175,6 +176,7 @@ Release 说明的写法参考：面向下载者，不写代码结构。参考同
 
 | tag | 附件 |
 |:---|:---|
+| v1.0.3 | `chihayaanon-skin-1.0.3-cn.zip` / `-intl.zip`（事件驱动首屏注入 + 状态文档 + 换肤事务） |
 | v1.0.2 | `chihayaanon-skin-1.0.2-cn.zip` / `-intl.zip` |
 | v1.0.1 | `chihayaanon-skin-1.0.1-cn.zip` / `-intl.zip` |
 | v1.0.0 | `chihayaanon-skin-1.0.0.zip`（单包，历史） |
