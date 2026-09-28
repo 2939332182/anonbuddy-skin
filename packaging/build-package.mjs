@@ -81,7 +81,7 @@ echo     点窗口右上角的 X 只会缩到托盘，不算真的退出。
 echo.
 pause
 
-node "scripts\\launch-and-skin.mjs" --prefer {edition} --port {port} --theme last --timeout 300
+node "scripts\\launch-and-skin.mjs" --prefer {edition} --port {port} --theme last --timeout 300 --setup
 
 if errorlevel 1 (
   echo.
@@ -93,9 +93,11 @@ if errorlevel 1 (
   echo.
   echo   [OK] 皮肤已经注入，右上角那颗浮动按钮点开就能换主题。
   echo.
-  echo   以后想开机就带皮肤：以管理员无关的普通身份跑一次
-  echo     powershell -File scripts\\setup-autoskin.ps1 -Prefer {edition}
-  echo   它会把桌面图标和开机自启都接到这套启动流程上。
+  echo   桌面图标、开始菜单和开机自启也一并接好了，
+  echo   以后开机、双击图标就是自带皮肤的，不用再跑别的命令。
+  echo.
+  echo   想撤销这些改动：
+  echo     powershell -File scripts\\setup-autoskin.ps1 -Undo
 )
 echo.
 pause
@@ -115,6 +117,10 @@ node "src\\cli.mjs" pause
 
 echo.
 echo   [OK] 已还原。
+echo.
+echo   注意：这一步只卸皮肤。桌面图标和开机自启还接着换肤流程，
+echo   下次开机、双击图标仍会带上皮肤。想连那些一起还原：
+echo     powershell -File scripts\\setup-autoskin.ps1 -Undo
 echo.
 pause
 `;

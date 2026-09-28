@@ -13,7 +13,7 @@
 //   node scripts/launch-and-skin.mjs --no-watch      不常驻补注入进程
 //   node scripts/launch-and-skin.mjs --no-restart    发现裸启动实例时直接报错
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,7 @@ const ARG_ALIASES = {
 
 function parseArgs(argv) {
   const tokens = argv.map((token) => ARG_ALIASES[token] ?? token);
-  const args = { exe: "", prefer: "", port: 0, theme: "last", watch: true, restart: true, timeout: 300 };
+  const args = { exe: "", prefer: "", port: 0, theme: "last", watch: true, restart: true, timeout: 300, setup: false };
   for (let i = 0; i < tokens.length; i += 1) {
     const a = tokens[i];
     if (a === "--exe") args.exe = tokens[++i] ?? "";
@@ -47,6 +47,8 @@ function parseArgs(argv) {
     else if (a === "--timeout") args.timeout = Number(tokens[++i] ?? 300);
     else if (a === "--no-watch") args.watch = false;
     else if (a === "--no-restart") args.restart = false;
+    else if (a === "--setup") args.setup = true;
+    else if (a === "--no-setup") args.setup = false;
     else if (a === "--help" || a === "-h") args.help = true;
     else throw new Error(`无法识别的参数：${a}`);
   }
@@ -101,6 +103,8 @@ async function main() {
   --timeout <秒>     等渲染进程的上限，默认 300
   --no-watch         不启动补注入进程
   --no-restart       发现裸启动实例时直接报错，不等用户
+  --setup            顺便把桌面图标/开始菜单/开机自启接到静默启动器上（包内 bat 默认带这个）
+  --no-setup         不做上面那件事，只注入这一次
   --help             显示本帮助`);
     return;
   }
@@ -221,6 +225,44 @@ async function main() {
             : "补注入进程已启动：后开的窗口会自动带上皮肤。",
         );
       }
+    }
+  }
+
+  // --- 5. 可选：把快捷方式 / 开机自启接到这套流程上 --------------------------
+  // 包里的「一键换肤.bat」默认带 --setup，让用户双击一次就拿到完整体验：
+  // 以后开机、双击图标都自带皮肤，不必再读文档、再手动跑一条命令。
+  // 放在**注入成功之后**做：这一步要改快捷方式和注册表，万一失败或用户中途
+  // 取消，皮肤也已经生效，不会白跑一趟。
+  if (args.setup) {
+    const setupScript = join(ROOT, "scripts", "setup-autoskin.ps1");
+    if (!existsSync(setupScript)) {
+      console.log("找不到 scripts\\setup-autoskin.ps1，跳过快捷方式绑定。");
+      return;
+    }
+    console.log("");
+    console.log("把桌面图标、开始菜单和开机自启接到这套启动流程上……");
+    const bound = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        setupScript,
+        "-WorkBuddyExe",
+        exe,
+        "-Port",
+        String(port),
+      ],
+      { cwd: ROOT, stdio: "inherit" },
+    );
+    if (bound.status === 0) {
+      console.log("");
+      console.log("完成。以后开机、双击图标都是自带皮肤的。");
+      console.log("想撤销这些改动：powershell -File scripts\\setup-autoskin.ps1 -Undo");
+    } else {
+      console.log("");
+      console.log(`快捷方式绑定没成功（退出码 ${bound.status}），但皮肤已经生效，这次照常能用。`);
     }
   }
 }

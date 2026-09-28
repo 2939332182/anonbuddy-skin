@@ -25,8 +25,8 @@
 ## 一次换肤要经过哪些文件
 
 ```
-双击 一键换肤.bat                        ← 包内生成，调下一行
-  └─ node scripts/launch-and-skin.mjs    ← 启动 + 等待 + 注入 + 拉常驻守护
+双击 一键换肤.bat                        ← 包内生成，调下一行（带 --setup）
+  └─ node scripts/launch-and-skin.mjs    ← 启动 + 等待 + 注入 + 拉常驻守护 + 接好启动入口
        ├─ src/platform/workbuddy-path.mjs ← 找主程序（51 候选 + 注册表）、找 node、推端口
        ├─ node src/cli.mjs apply          ← 校验主题、组装 payload
        │    └─ src/injector.mjs           ← 连 CDP、找 renderer target、注入
@@ -142,7 +142,7 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 
 ## 已知限制与待办
 
-- **皮肤不持久**。手动重启 WorkBuddy 后就没了，这是设计如此。想开机自带要跑 `scripts/setup-autoskin.ps1`（它会把桌面/开始菜单/自启入口改接到 `autoskin-launch.vbs` → `launch-and-skin.mjs`）。
+- **皮肤不持久**。手动重启 WorkBuddy 后就没了，这是设计如此。开机自带靠 `scripts/setup-autoskin.ps1` 把入口改接到 `autoskin-launch.vbs` → `launch-and-skin.mjs`；**包内的「一键换肤.bat」带 `--setup` 会自动做掉这一步**（见 `launch-and-skin.mjs` 第 5 段），用户双击一次就拿到完整体验，不用再读文档跑第二条命令。
 - **保留的 3 个非 Node 脚本**是有理由的，别顺手删：`setup-autoskin.ps1` + `workbuddy-path.ps1` 要驱动 `WScript.Shell` COM 改写 `.lnk`（Node 没有对等接口）；`autoskin-launch.vbs` 是唯一能让快捷方式启动子进程不闪控制台窗口的手段。
 - **`scripts/` 里还有 20 多个探针脚本**（`probe-*` / `shot-*` / `check-*`）。它们是排查工具不是运行时依赖，没有进发布包。要清理的话先确认 `test-scripts-registry.mjs` 还过。
 - **`docs/` 里的历史数据不要删。** `ARCHITECTURE.md` 里有针对已移除主题的对比度实测、macOS 时代的 `MENUBAR_HEIGHT` 讨论——那是解释"为什么这么修"的历史记录。
