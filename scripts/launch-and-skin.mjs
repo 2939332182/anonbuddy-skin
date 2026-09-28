@@ -112,6 +112,21 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  // --prefer 是**软偏好**：候选列表里没有那一版时会静默退回另一版。
+  // 便携版（解压即用、不写注册表）恰好落在自动发现范围之外，于是双击「国内版」的包
+  // 会开出来国际版，而屏幕上一句提示都没有 —— 用户只会觉得"这包不对"。
+  // 所以命中不了偏好时把话说清楚，并指出真正的解法。
+  if (args.prefer) {
+    const want = args.prefer === "cn" ? "workbuddy.exe" : "workbuddyai.exe";
+    if (basename(exe).toLowerCase() !== want) {
+      console.log("");
+      console.log(`  ⚠️  你要的是 ${args.prefer === "cn" ? "国内版" : "国际版"}，但自动发现没找到它。`);
+      console.log(`      实际会用：${exe}`);
+      console.log("      便携版（解压出来直接用、没写过注册表）不在自动发现范围内。");
+      console.log('      请改用 --exe "<主程序完整路径>"，或直接双击你平时用的那个图标。');
+      console.log("");
+    }
+  }
   const port = args.port || portForExe(exe);
   const procName = processNameFor(exe);
   console.log(`WorkBuddy : ${exe}`);
