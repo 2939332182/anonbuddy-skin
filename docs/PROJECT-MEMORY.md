@@ -121,8 +121,14 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 - **保留的 3 个非 Node 脚本**是有理由的，别顺手删：`setup-autoskin.ps1` + `workbuddy-path.ps1` 要驱动 `WScript.Shell` COM 改写 `.lnk`（Node 没有对等接口）；`autoskin-launch.vbs` 是唯一能让快捷方式启动子进程不闪控制台窗口的手段。
 - **`scripts/` 里还有 20 多个探针脚本**（`probe-*` / `shot-*` / `check-*`）。它们是排查工具不是运行时依赖，没有进发布包。要清理的话先确认 `test-scripts-registry.mjs` 还过。
 - **`docs/` 里的历史数据不要删。** `ARCHITECTURE.md` 里有针对已移除主题的对比度实测、macOS 时代的 `MENUBAR_HEIGHT` 讨论——那是解释"为什么这么修"的历史记录。
-- **本机代理可能抽风**：`git fetch` 偶尔报 `Failed to connect to github.com:443 over proxy 127.0.0.1`，但 `push` 通常没问题。仓库级配了 `http.proxy = http://127.0.0.1:7897`。
-- **发布用的 token 在 git credential 里**（`gho_` 前缀，40 字符，有 repo 权限）。创建 Release 和上传附件走 `api.github.com` + `uploads.github.com`，`Invoke-RestMethod` 默认走系统代理。
+- **代理时有时无，别被它卡住。** 这台机器上 `127.0.0.1:7897` 的代理会停。停了以后 `git push` 会报 `Failed to connect to github.com:443 over proxy 127.0.0.1` —— 这时候直接绕过代理推：
+
+  ```bash
+  git -c http.proxy= -c https.proxy= push origin main
+  ```
+
+  仓库级原本配了 `http.proxy`，已经摘掉了（直连能走通）。如果哪天直连被 RST 了再把代理配回去。
+- **发布用的 token 在 git credential 里**（`gho_` 前缀，40 字符，有 repo 权限）。创建 Release 和上传附件走 `api.github.com` + `uploads.github.com`，`Invoke-RestMethod` 默认走系统代理；代理停着也能直连。
 
 ## 发布流程（照抄即可）
 
