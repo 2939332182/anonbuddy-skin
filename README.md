@@ -199,7 +199,7 @@ node src\cli.mjs apply --theme chunzhi-night
 
 **壁纸列表是空的** — 先确认 Wallpaper Engine 里有订阅。实在没有，用面板上的「手动目录」挑个文件夹也行。
 
-**5.6 之后的设置窗口没皮肤** — 5.6 起设置变成了独立窗口，插件用 `scripts/watch-targets.mjs` 盯着补注入，启动器默认会拉起它。不想常驻就给 `launch-and-skin.ps1` 加 `-NoWatch`。跨窗口的主题和壁纸状态由 `storage` 事件双向同步。
+**5.6 之后的设置窗口没皮肤** — 5.6 起设置变成了独立窗口，启动器会拉起常驻守护 `scripts/skin-guard.mjs`：它连上 CDP 的 browser 端点做 `Target.setAutoAttach`，新窗口一出生就被接管，趁它的文档还没创建就把皮肤装好，所以设置页第一帧就是带皮肤的，也不需要轮询等待。不想常驻就加 `--no-watch`。跨窗口的主题和壁纸状态由 `storage` 事件双向同步。
 
 ## 想改代码
 

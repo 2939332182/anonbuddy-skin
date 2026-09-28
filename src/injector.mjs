@@ -4,6 +4,8 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
+import { REPORT_BINDING } from "./constants.mjs";
+import { readActiveId } from "./active-state.mjs";
 import { buildSkinCss } from "./skin-css.mjs";
 import { buildSkinMenuScript, CSS_SENTINELS } from "./skin-menu.mjs";
 import { scanAll as scanWeLibrary, toFileUrl } from "./we-library.mjs";
@@ -58,9 +60,14 @@ async function themeEntry(loadedTheme) {
   };
 }
 
-export async function applySkin({ loadedTheme, themes, port, activeId, restoreLast = false, weItems = null, warmWeCache = false, deps = {} }) {
-  const wait = deps.waitForRendererTargets ?? waitForRendererTargets;
-  const Session = deps.Session ?? CdpSession;
+/**
+ * 组装注入载荷 —— 只产出脚本文本，不连任何 CDP。
+ *
+ * 抽出来的原因：常驻守护（skin-guard.mjs）必须在一个渲染进程**诞生之前**
+ * 就拿到脚本文本（用来 Page.addScriptToEvaluateOnNewDocument），那一刻它
+ * 既不知道有几个 target、也没连上任何 target。
+ */
+export async function buildInjectionPayload({ loadedTheme, themes, activeId, restoreLast = false, weItems = null, warmWeCache = false, deps = {} }) {
   const menuThemes = themes?.length ? themes : [loadedTheme];
   const entries = [];
   for (const theme of menuThemes) entries.push(await themeEntry(theme));
@@ -140,6 +147,16 @@ export async function applySkin({ loadedTheme, themes, port, activeId, restoreLa
     },
     heroDataUrl: CSS_SENTINELS.hero,
   });
+  // 外部状态文档记着的"上次皮肤"。常驻守护要在新窗口诞生前就决定首屏用哪套主题，
+  // 那时它连不上任何渲染进程，只能读这个。读不到（首次运行）就给 null，
+  // 渲染进程会退回自己的 localStorage。
+  let activeHint = null;
+  try {
+    activeHint = deps.readActiveId ? deps.readActiveId() : readActiveId();
+  } catch {
+    /* 状态文档读不了不影响换肤，渲染进程照旧用 localStorage */
+  }
+
   const expression = buildSkinMenuScript({
     entries,
     activeId: themeId,
@@ -153,17 +170,34 @@ export async function applySkin({ loadedTheme, themes, port, activeId, restoreLa
     weItems: resolvedWe,
     // RePKG 是否可用（面板据此提示可以升级到 4K）
     weRepkgAvailable: Boolean(weMeta && weMeta.repkgPath),
+    // 外部状态文档里的当前皮肤 + 守护挂的上报通道名（见 active-state.mjs / skin-guard.mjs）
+    activeHint,
+    reportBinding: REPORT_BINDING,
+  });
+  return {
+    expression,
+    themeId,
+    restoreLast,
+    menuThemes: entries.map(({ id }) => id),
+  };
+}
+
+export async function applySkin({ loadedTheme, themes, port, activeId, restoreLast = false, weItems = null, warmWeCache = false, deps = {} }) {
+  const wait = deps.waitForRendererTargets ?? waitForRendererTargets;
+  const Session = deps.Session ?? CdpSession;
+  const payload = await buildInjectionPayload({
+    loadedTheme, themes, activeId, restoreLast, weItems, warmWeCache, deps,
   });
   const targets = await wait(port, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,
     pollMs: deps.pollMs ?? 500,
   });
-  const values = await evaluateTargets(targets, expression, Session);
+  const values = await evaluateTargets(targets, payload.expression, Session);
   return {
     applied: values.length,
-    themeId,
-    restoreLast,
-    menuThemes: entries.map(({ id }) => id),
+    themeId: payload.themeId,
+    restoreLast: payload.restoreLast,
+    menuThemes: payload.menuThemes,
     targets: targets.map(({ id }) => id),
   };
 }

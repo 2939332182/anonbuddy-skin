@@ -26,16 +26,20 @@
 
 ```
 双击 一键换肤.bat                        ← 包内生成，调下一行
-  └─ node scripts/launch-and-skin.mjs    ← 启动 + 等待 + 注入 + 拉 watcher
+  └─ node scripts/launch-and-skin.mjs    ← 启动 + 等待 + 注入 + 拉常驻守护
        ├─ src/platform/workbuddy-path.mjs ← 找主程序（51 候选 + 注册表）、找 node、推端口
-       └─ node src/cli.mjs apply          ← 校验主题、组装 payload
-            └─ src/injector.mjs           ← 连 CDP、找 renderer target、注入
-                 ├─ src/cdp-client.mjs    ← CDP 会话与 target 发现
-                 ├─ src/skin-menu.mjs     ← 拼注入脚本（正文读 src/inject/*.js）
-                 └─ src/skin-css.mjs      ← 拼皮肤 CSS（正文读 src/css/skin.css）
+       ├─ node src/cli.mjs apply          ← 校验主题、组装 payload
+       │    └─ src/injector.mjs           ← 连 CDP、找 renderer target、注入
+       │         ├─ src/cdp-client.mjs    ← CDP 会话与 target 发现
+       │         ├─ src/skin-menu.mjs     ← 拼注入脚本（正文读 src/inject/*.js）
+       │         └─ src/skin-css.mjs      ← 拼皮肤 CSS（正文读 src/css/skin.css）
+       └─ node scripts/skin-guard.mjs     ← 常驻守护：新渲染进程一出生就注入
+            └─ src/skin-guard.mjs         ← browser 端点 + Target.setAutoAttach
+                 ├─ src/active-state.mjs  ← 状态文档（state.json）原子读写
+                 └─ src/cdp-client.mjs    ← CDP 会话（browser 级 + 事件订阅）
 ```
 
-`scripts/watch-targets.mjs` 是另一条线：5.6.x 起设置是**独立 renderer 窗口**，在我们注入之后才创建，所以需要一个常驻进程轮询 CDP、发现新窗口就补一次注入（约 40 MB，`--no-watch` 可关）。
+5.6.x 起设置是**独立 renderer 窗口**，在启动那一刻的注入之后才创建，所以需要一条常驻的补注入线路。现在默认走 `scripts/skin-guard.mjs`：连 browser 端点做 `Target.setAutoAttach({waitForDebuggerOnStart:true})`，新渲染进程**一出生就被暂停**，趁暂停期把脚本装到"文档创建点"上再放行 —— 首屏直接带皮肤、没有轮询延迟、不需要反复 spawn 子进程。老的 `scripts/watch-targets.mjs`（2 秒轮询 `/json/list`，发现新 target 就 spawn 一个 `cli apply`）**保留着当回退路径**，两条路职责相同实现不同；`launch-and-skin.mjs` 里 `--no-watch` 两条都不起。
 
 ## 目录速查
 
@@ -43,6 +47,9 @@
 |:---|:---|
 | `src/` | 注入逻辑本体（Node 侧） |
 | `src/inject/*.js` | 注入到 renderer 的脚本正文，11 个分片，**不是 ES 模块** |
+| `src/skin-guard.mjs` | 常驻守护：browser 端点 + auto-attach，新渲染进程首屏注入 |
+| `src/active-state.mjs` | 状态文档 `state.json` 的原子读写（临时文件 + rename） |
+| `scripts/skin-guard.mjs` | 守护的 CLI 入口（启动器拉起的就是它，日志落 `AnonBuddySkin\injector.log`） |
 | `src/css/skin.css` | 皮肤样式正文，占位符 `{{accent}}` 之类由 `skin-css.mjs` 填充 |
 | `src/platform/` | 宿主适配（路径解析） |
 | `themes/<id>/` | 内置主题，每个是 `theme.json` + `hero.webp` |
@@ -114,6 +121,24 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 **ZIP 必须用正斜杠**（APPNOTE 4.4.17.1）。1.0.0 那个包 44 个条目全是反斜杠，严格解压器会丢掉目录树。打包器写盘前后各校验一次。
 
 **`homedir` 在 `node:os` 不在 `node:path`。**
+
+**WorkBuddy 自动更新会把调试端口吃掉。** 应用更新时先以 `reason=update` 关掉旧进程，再由更新器拉起新进程（`source=app_startup` / `startup_type=upgrade`），**原始命令行参数不被继承**，`--remote-debugging-port` 就此消失。表现：更新前皮肤正常，更新后打开是裸的，`cli.mjs status` 报 `fetch failed`，`9333`/`9334` 全空。这不是故障，是"不碰官方文件"的代价——更新一次就得重走一次启动器。判定方法：看 `~/.workbuddy-ai/logs/AppStartup.log`，`[AppShutdown] ... reason=update` 紧跟 `[AppStartup] ... source=app_startup`，再跟一行 `startup_type=upgrade` 就是它。（2026-09-29 实例：5.5.2 → 5.6.2，build `910352f0` → `bd96da3a`。）
+
+**`setup-autoskin.ps1` 是"一个 exe 绑一次"，不是全局开关。** 它按 `TargetPath -ieq $ExePath` 精确匹配，所以国际版和国内版各要跑一遍（`-Prefer intl -Port 9333` / `-Prefer cn -Port 9334`），绑定状态记在 `%LOCALAPPDATA%\AnonBuddySkin\autoskin-setup.json`。只绑了一个版本时，另一个版本的图标可能停在"直连 exe + `--remote-debugging-port`"的半截状态——**只开端口、没有注入环节**，双击出来是带端口的裸应用，一样没皮肤。
+
+**`Page.addScriptToEvaluateOnNewDocument` 的脚本跑在"文档创建点"，那里 `<head>` 和 `<body>` 都还不存在。** 注入脚本正文两头都依赖它们（`document.head.appendChild(style)` / `document.body.appendChild(root)`），直接跑必抛 TypeError。最阴的是**症状**：注册调用返回成功、守护日志里一条错误都没有，重载后页面干干净净；换成 30 字节的探针 `window.__x=1` 却能稳稳活过重载 —— 很容易误判成"注册机制不work"。所以 `skin-menu.mjs` 的包裹层会先等 `document.body` 出现再执行正文。（只等 head 不够：会在 `appendChild(body)` 那一行再炸一次，实测现象是 style 建出来了、菜单和主题都没有。）
+
+**CDP 会话有两种，寿命不一样。** `Target.setAutoAttach` 自动附加出来的会话**能活过页面重载**；`Target.attachToTarget` 显式附加出来的**活不过重载**，注册在它上面的 `addScriptToEvaluateOnNewDocument` 随之失效。偏偏 `setAutoAttach` 会把"已经在跑的" target 一并附加上，于是同一个窗口拿到两个会话。别挑一个用 —— **每个会话都注册一份**（注入脚本幂等，重复注册只多跑一次）。
+
+**`Target.attachedToTarget` 的 `sessionId` 在 `params` 里**，不在消息顶层。顶层那个 `sessionId` 只有"子会话发出的事件"（如 `Runtime.bindingCalled`）才有。分不清这两者会写出永远拿不到 sessionId 的代码，症状是"事件收到了但什么都没发生"。
+
+**`requestAnimationFrame` 在页面不可见时完全不执行。** 窗口最小化或收进托盘时 rAF 一个回调都不来（实测 300ms 内零回调，`Page.bringToFront` 也唤不回最小化的窗口）。`08-copy-typewriter.js` 的 `scheduleCopy` 一度把"重置标志位"写在 rAF 回调里，于是第一次排队的回调不来、`copyScheduled` 永久卡在 true，之后所有自动修复全被它挡掉 —— 表现是切页之后标题再也不变回来。现在 rAF / `setTimeout` / `queueMicrotask` 三路兜底（microtask 不受可见性影响，隐藏场景靠它）。连带影响：`test-roll-anim.mjs` 靠逐帧采样，窗口不可见时采不到帧，现在会明确 SKIP 并提示切到前台，而不是报一个误导性的 FAIL。
+
+**快捷方式的参数拼写必须和启动器对齐，而 vbs 是把参数原样透传的。** `setup-autoskin.ps1` 的 `$vbsArgs` 一度写成 PowerShell 风格的 `-WorkBuddyExe ... -Port ...`，而 `launch-and-skin.mjs` 只认 `--exe / --port` → 双击图标时启动器当场抛「无法识别的参数」然后退出；**vbs 又是用隐藏窗口跑的（`shell.Run cmd, 0, False`），报错一个字都传不到眼前** → 症状就是"点了没反应 / 国内版打不开"。两头都要堵：启动器加 `ARG_ALIASES` 认下旧拼写（让已经绑好的图标记即恢复），生成的快捷方式改成规范双横线。
+
+**已绑定的快捷方式里 `TargetPath` 是 `wscript.exe`，不再是 app 的 exe。** `Get-LaunchEntries` 原本只匹配 `TargetPath -ieq $ExePath`，于是**绑定过的入口再也不会被识别** —— 参数格式过期也永远改不回来（实测：重跑绑定只动到了 Run 键，桌面图标纹丝不动）。现在同时匹配"已指向本启动器且参数里带着这个 exe"的形态，`skip (already bound)` 也从"凡绑定就跳过"改成"只在参数已是当前格式时才跳过"。
+
+**`Page.addScriptToEvaluateOnNewDocument` 只对**之后**创建的文档生效，而窗口从 `about:blank` 走到真实页面可能就发生在"注册"这几毫秒里。** 实测（2026-09-29）：国内版设置窗口的日志停在「已预置首屏脚本 10970EF6（等待导航）」，之后杳无音信，设置里也就看不到插件入口；**手动 reload 一次皮肤立刻全好** —— 这说明注册机制本身没问题，只是那一次导航被错过了。守护现在注册完之后会重新问一次 `location.href`：窗口若仍被 `waitForDebuggerOnStart` 暂停着，`Runtime.evaluate` 会因为还没有执行上下文而失败（那就是真的还没导航，继续等首屏脚本即可）；否则说明已经错过，补一次即时注入。
 
 ## 已知限制与待办
 

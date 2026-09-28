@@ -62,7 +62,13 @@ export async function createHarness(options = {}) {
             `端口 ${port} 上没有可用的 renderer。请先启动 WorkBuddy，或用 WORKBUDDY_SKIN_PORT 指定端口。`,
           );
         }
-        const s = new CdpSession(targets[0].webSocketDebuggerUrl);
+        // 5.6.x 的设置是**独立 renderer 窗口**，URL 同样带 renderer/index.html，
+        // 但它没有欢迎页标题 / 侧边栏那套 DOM —— 测试连上它只会全线报 null
+        // （2026-09-29 实测：打开设置窗口后 core 套件整片失败，看着像注入坏了）。
+        // 注入本身要覆盖所有窗口，但**测试要的是主窗口**，所以这里显式挑一个：
+        // 设置窗口的 URL 带 windowAppId=，主窗口不带。挑不出来才退回第一个。
+        const main = targets.find((t) => !/[?&]windowAppId=/i.test(t.url)) ?? targets[0];
+        const s = new CdpSession(main.webSocketDebuggerUrl);
         await s.open();
         return s;
       })()

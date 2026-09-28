@@ -71,7 +71,7 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
-export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false }) {
+export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, activeHint = null, reportBinding = null }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
   }
@@ -107,6 +107,14 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     customId: "custom-upload",
     storageKey: "workbuddyCustomTheme",
     customListKey: "workbuddyCustomThemes",
+    // 外部状态文档（%LOCALAPPDATA%\AnonBuddySkin\state.json）里记着的"上次皮肤"。
+    // 它是 Node 侧写入的旁路状态：常驻守护在新窗口诞生前就得决定用哪套主题，
+    // 那时它还连不上任何渲染进程。渲染进程优先信它，它没记录、或者记录的皮肤
+    // 已经不存在（自定义主题被删）时，才回退到 localStorage 的 LAST_KEY。
+    activeHint: typeof activeHint === "string" && activeHint.length > 0 ? activeHint : null,
+    // 常驻守护用 Runtime.addBinding 注册的上报通道名。一次性注入（cli apply）时是 null，
+    // 脚本里取不到函数就静默跳过 —— 状态文档在那种路径下由守护自己补记。
+    reportBinding: typeof reportBinding === "string" && reportBinding.length > 0 ? reportBinding : null,
     // 设置面板集成：往「功能」分组插一个入口，右侧内容区渲染我们的面板
     pluginName: "ChihayaAnon 插件",
     // 分组名直写中文即可：这个对象字面量在 Node 侧构造、再作为 payload 传进 renderer，
@@ -128,6 +136,19 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     defaultAccent: DEFAULT_ACCENT,
   });
 
-  // 头尾保持一字不差：正文分片是从原模板求值后的产物逐字节切出来的，拼接结果与拆分前完全等价
-  return `(() => {\n  const data = ${payload};\n${readInjectedScript()}\n})()`;
+  // 头尾保持一字不差：正文分片是从原模板求值后的产物逐字节切出来的，拼接结果与拆分前完全等价。
+  //
+  // 外面多包一层"等 body"的守卫，是为了常驻守护那条路径（2026-09-29 实测踩坑）：
+  // 守护用 Page.addScriptToEvaluateOnNewDocument 把这段脚本注册在**文档创建点**上，
+  // 而那一刻 <head> 和 <body> 都还没被解析出来。正文两头都依赖它们 ——
+  // 开头 `document.head.appendChild(style)`，中段 `document.body.appendChild(root)`。
+  // 直接跑必然抛 TypeError，皮肤根本长不出来。
+  // 症状极具迷惑性：注册调用返回成功、日志里没有任何错误，重载后却什么都没有；
+  // 换成 30 字节的探针 `window.__x=1` 却能稳稳活过重载 —— 说明问题不在注册机制，
+  // 在执行时机。而且只等 head 也不够：等到 head 就往下跑，会在 appendChild(body)
+  // 那一行再炸一次（实测现象是 style 元素建出来了、菜单和主题都没了）。
+  // 等 body：body 出现意味着 head 必然已在，一次等到位，且那时页面还没渲染出内容，
+  // 首屏依然是带皮肤的。cli apply 那条路径（Runtime.evaluate）跑在早已加载完的文档上，
+  // body 必然存在，走的是同一个直接分支，行为与改动前完全一致。
+  return `(() => {\n  const data = ${payload};\n  const bootSkin = () => {\n${readInjectedScript()}\n  };\n  if (document.body) { bootSkin(); return; }\n  const bootWatch = new MutationObserver(() => {\n    if (!document.body) return;\n    bootWatch.disconnect();\n    bootSkin();\n  });\n  bootWatch.observe(document.documentElement || document, { childList: true, subtree: true });\n})()`;
 }

@@ -139,11 +139,29 @@
   const scheduleCopy = () => {
     if (stopped || copyScheduled) return;
     copyScheduled = true;
-    requestAnimationFrame(() => {
+    // ⚠️ 不能只靠 rAF 来重置标志位（2026-09-29 实测踩坑）：
+    //    页面不可见时（窗口最小化 / 被收进托盘）requestAnimationFrame **完全不执行**
+    //    —— 实测 hidden 状态下 300ms 内零回调。而重置写在 rAF 回调里，那次回调不来，
+    //    copyScheduled 就永久卡在 true，之后每一次 scheduleCopy 都被它挡掉，
+    //    文案替换的自动修复彻底停摆：切页 / React 重渲染把标题写回原文之后，
+    //    再也不会变回来（观察器和 1.5s 定时器都走这里，一起阵亡）。
+    //    加一道定时器兜底：rAF 与 setTimeout 谁先到用谁，标志位一定会被放掉。
+    //    （setTimeout 在后台页面会被节流，但仍会执行；rAF 是压根不执行，这是区别。）
+    const flush = () => {
+      if (!copyScheduled) return;
       copyScheduled = false;
       if (stopped) return;
       applyCopy();
-    });
+    };
+    requestAnimationFrame(flush);
+    // 隐藏场景的第二道与第三道兜底：
+    //   页面不可见时 rAF 压根不执行（见上），而定时器会被 Chromium 节流 ——
+    //   隐藏超过一会儿之后 setInterval/setTimeout 能拖到秒级甚至分钟级。
+    //   两条路都慢，文案替换就会拖到用户重新看到窗口才补上（实测：还原成原文案后
+    //   等 9.5 秒毫无反应）。microtask 不受页面可见性影响，用它兜住这一档；
+    //   可见时它也先跑一次，但 applyCopy 幂等、且同一批 MutationObserver 回调
+    //   本来就已经被合并过，代价可以忽略。
+    queueMicrotask(flush);
   };
   applyCopy();
 

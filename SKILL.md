@@ -224,7 +224,12 @@ node --check src/cli.mjs  # syntax
   is the only way to start a child process without a console window flashing.
 - `scripts/workbuddy-path.ps1` — only dot-sourced by `setup-autoskin.ps1`; the Node
   module above is the real entry point.
-- `scripts/watch-targets.mjs` — re-inject windows opened later (Settings is its own window in 5.6.x).
+- `scripts/skin-guard.mjs` — resident guard (started by the launcher): attaches to the CDP
+  browser endpoint with `Target.setAutoAttach`, so every new renderer is injected *before*
+  its document is created (Settings is its own window in 5.6.x). `scripts/watch-targets.mjs`
+  is the older 2-second polling fallback, still used when the guard is missing.
+- `src/skin-guard.mjs` / `src/active-state.mjs` — the guard implementation and the atomic
+  state document (`%LOCALAPPDATA%\AnonBuddySkin\state.json`) that records the active skin.
 - `themes/` — built-in theme folders (`theme.json` + `hero.webp`).
 - `packaging/build-package.mjs` — builds the `-cn` / `-intl` release zips (Node only, no Python).
 - `README.md` — full human-readable documentation.

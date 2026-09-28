@@ -6,6 +6,18 @@ import { createHarness } from "./_harness.mjs";
 const t = await createHarness({ name: "test-roll-anim" });
 const { session } = t;
 
+// 前置条件：逐帧采样靠 requestAnimationFrame 驱动，而页面不可见时 rAF **根本不执行**
+// （2026-09-29 实测：hidden 状态下 300ms 内零回调；窗口被最小化或收进托盘都会这样）。
+// 那种情况下"采到 0 帧"是环境问题，不是动画坏了 —— 明确跳过，别报假失败。
+// CDP 唤不回最小化的窗口（Page.bringToFront 实测无效），只能请人把窗口切到前台。
+const pageVisible = await session.evaluate(`document.visibilityState === "visible"`);
+if (!pageVisible) {
+  console.log("SKIP  页面当前不可见（visibilityState=hidden）—— rAF 不执行，采不到逐字动画帧。");
+  console.log("      把 WorkBuddy 窗口切到前台（不要最小化 / 不要收进托盘）后重跑本测试。");
+  session.close();
+  process.exit(0);
+}
+
 // 到别的页去，这样切回新建任务时标题会重新挂载（模拟"打开新建任务"）
 await session.evaluate(`(() => {
   [...document.querySelectorAll("[data-view-id=sidebar] button")]

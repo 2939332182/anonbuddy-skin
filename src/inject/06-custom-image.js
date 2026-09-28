@@ -92,12 +92,11 @@
 
   const applyCustomTheme = (theme) => {
     onLeaveWeTheme();
-    skinOwned = true;
-    style.textContent = buildCustomCss(theme.dataUrl, theme.colors, theme.id);
-    document.documentElement.dataset.anonbuddySkin = theme.id;
-    applyMode(theme.colors.surface);
-    paint(theme.id);
-    writeLastTheme(theme.id);
+    // 先算后落地：CSS 合成失败时不该动任何状态。
+    // 原来是内联在赋值里算的，buildCustomCss 一旦抛错，skinOwned 已经被改成 true、
+    // style 却还是旧的 —— 正好是"半截状态"的典型样本。现在交给 commitTheme 兜。
+    const css = buildCustomCss(theme.dataUrl, theme.colors, theme.id);
+    commitTheme({ css, skinId: theme.id, owned: true, surface: theme.colors.surface, storageValue: theme.id });
   };
 
   const renderCustomRow = (theme) => {

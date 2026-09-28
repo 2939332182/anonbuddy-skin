@@ -1,6 +1,6 @@
 {
   "name": "anonbuddy-skin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "给 WorkBuddy 桌面端换肤：注入式主题系统（不改 app.asar），带主题菜单与逐字打字标题动画",
   "homepage": "https://github.com/2939332182/anonbuddy-skin#readme",

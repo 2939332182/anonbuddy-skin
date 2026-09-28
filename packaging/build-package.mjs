@@ -45,8 +45,9 @@ const EDITIONS = {
 // （快捷方式静默启动）；其余启动逻辑全在 Node 里。
 const SCRIPTS = [
   "launch-and-skin.mjs",  // 带端口启动 + 注入，一步到位
+  "skin-guard.mjs",       // 常驻守护：新渲染进程一出生就注入（5.6.x 起设置是独立窗口）
   "find-workbuddy.mjs",   // 路径排查
-  "watch-targets.mjs",    // 补注入后开的窗口（5.6.x 起设置是独立窗口）
+  "watch-targets.mjs",    // 老的轮询版补注入，留作回退路径
   "autoskin-launch.vbs",  // 静默启动器，快捷方式走它才不会闪黑框
   "setup-autoskin.ps1",   // 把快捷方式/开机自启接到上面那个
   "workbuddy-path.ps1",   // 仅被 setup-autoskin.ps1 dot-source：.lnk 的 COM 接口在
@@ -166,9 +167,9 @@ WorkBuddy 有两条产品线，装出来的东西不一样：
 设置页里为什么会有换肤入口
 --------------------------
 
-启动器会顺带盯着 WorkBuddy 新开的窗口（比如设置是独立窗口），
-新窗口一出现就自动补一次注入，所以设置页里也能看到换肤入口。
-不想让它常驻，启动时加 -NoWatch。
+启动器会拉起一个常驻守护盯着 WorkBuddy 新开的窗口（比如设置是独立窗口）：
+它在新窗口刚创建、还没加载出内容的时候就完成注入，所以设置页里也能看到换肤入口，
+打开的一瞬间就是带皮肤的。不想让它常驻，给启动器加 --no-watch。
 
 如果报错
 --------

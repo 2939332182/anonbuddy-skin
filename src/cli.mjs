@@ -32,7 +32,7 @@ function portFrom(value) {
   return port;
 }
 
-function defaults(overrides) {
+export function defaults(overrides) {
   const paths = resolveStudioPaths();
   return {
     bundledThemesRoot: join(sourceRoot, "themes"),
@@ -51,6 +51,40 @@ function defaults(overrides) {
     skinStatus,
     ...overrides,
   };
+}
+
+/**
+ * 选出本次要应用的主题，并把菜单需要的所有主题都加载好。
+ *
+ * 抽出来是因为它有两个入口：`cli apply`（一次性注入）和 scripts/skin-guard.mjs
+ * （常驻守护，要在渲染进程诞生前就把脚本文本备好）。两边必须选出同一套主题，
+ * 否则主窗口和新窗口的菜单会不一致。
+ */
+export async function prepareApply({ roots, deps, requested = DEFAULT_THEME_ID }) {
+  // `--theme last`：真正用哪个主题交给 renderer 决定（它才知道用户最后在菜单里选了什么，
+  // 包括只存在于 localStorage 的自定义主题）。这里只挑一个兜底主题，用于构建菜单与 CSS 模板。
+  const restoreLast = requested === "last";
+  const themes = await deps.listThemes({ roots });
+  if (themes.length === 0) throw new Error("没有可用主题");
+  const activeId = restoreLast
+    ? (themes.some((theme) => theme.id === DEFAULT_THEME_ID) ? DEFAULT_THEME_ID : themes[0].id)
+    : requested;
+  const selected = themes.find((theme) => theme.id === activeId);
+  if (!selected) throw new Error(`找不到主题：${activeId}`);
+  const loadedTheme = await deps.loadTheme(selected.path);
+  const menuThemes = [];
+  for (const theme of themes) {
+    if (theme.id === activeId) {
+      menuThemes.push(loadedTheme);
+      continue;
+    }
+    try {
+      menuThemes.push(await deps.loadTheme(theme.path));
+    } catch {
+      // 坏主题不阻塞换肤，只是不进菜单
+    }
+  }
+  return { loadedTheme, themes: menuThemes, activeId, restoreLast };
 }
 
 export async function runCli(argv, overrides = {}) {
@@ -85,33 +119,10 @@ export async function runCli(argv, overrides = {}) {
     return deps.createSingleImageTheme({ imagePath: args.image, name: args.name, storeRoot: deps.userThemesRoot });
   }
   if (command === "apply") {
-    const requested = args.theme ?? DEFAULT_THEME_ID;
-    // `--theme last`：真正用哪个主题交给 renderer 决定（它才知道用户最后在菜单里选了什么，
-    // 包括只存在于 localStorage 的自定义主题）。这里只挑一个兜底主题，用于构建菜单与 CSS 模板。
-    const restoreLast = requested === "last";
-    const themes = await deps.listThemes({ roots });
-    if (themes.length === 0) throw new Error("没有可用主题");
-    const activeId = restoreLast
-      ? (themes.some((theme) => theme.id === DEFAULT_THEME_ID) ? DEFAULT_THEME_ID : themes[0].id)
-      : requested;
-    const selected = themes.find((theme) => theme.id === activeId);
-    if (!selected) throw new Error(`找不到主题：${activeId}`);
-    const loadedTheme = await deps.loadTheme(selected.path);
-    const menuThemes = [];
-    for (const theme of themes) {
-      if (theme.id === activeId) {
-        menuThemes.push(loadedTheme);
-        continue;
-      }
-      try {
-        menuThemes.push(await deps.loadTheme(theme.path));
-      } catch {
-        // 坏主题不阻塞换肤，只是不进菜单
-      }
-    }
+    const prepared = await prepareApply({ roots, deps, requested: args.theme ?? DEFAULT_THEME_ID });
     // WE 壁纸盘点由 applySkin 内部负责（所有注入路径的汇合点），这里不再重复扫一遍。
     // warmWeCache：真实入口才开后台上预热（把未解过的 scene 壁纸丢给脱离的子进程），测试不会走到这里。
-    return deps.applySkin({ loadedTheme, themes: menuThemes, port: portFrom(args.port), activeId, restoreLast, warmWeCache: true });
+    return deps.applySkin({ ...prepared, port: portFrom(args.port), warmWeCache: true });
   }
   if (command === "pause" || command === "restore") {
     return deps.removeSkin({ port: portFrom(args.port) });

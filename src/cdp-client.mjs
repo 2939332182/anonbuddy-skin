@@ -8,6 +8,10 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 5000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 5000;
 
+// 连到 page target 时要打开的域；连到 browser target 时一个都不能开
+// （browser 端点没有 Runtime/Page 域，发过去会被协议拒绝）。
+const PAGE_DOMAINS = ["Runtime", "Page"];
+
 function validatePort(port) {
   if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) {
     throw new TypeError(
@@ -241,6 +245,126 @@ export async function fetchRendererTargets(
   return filterRendererTargets(targets);
 }
 
+/**
+ * 取 browser 级调试端点（不是某个页面，而是整个浏览器实例）。
+ *
+ * 只有走这个端点才能用 Target.setAutoAttach —— 那需要在渲染进程**诞生之前**
+ * 就挂上去，page 级会话做不到（连上时页面早跑起来了）。
+ */
+export async function fetchBrowserEndpoint(
+  port,
+  {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = DEFAULT_DISCOVERY_TIMEOUT_MS,
+  } = {},
+) {
+  validatePort(port);
+  validateDuration(timeoutMs, "timeoutMs", { allowZero: false });
+  if (typeof fetchImpl !== "function") {
+    throw new TypeError("fetchImpl must be a function");
+  }
+
+  const endpoint = `http://127.0.0.1:${port}/json/version`;
+  const controller = new AbortController();
+  const deadline = Date.now() + timeoutMs;
+  let response;
+  try {
+    response = await awaitBeforeDeadline(
+      Promise.resolve(
+        fetchImpl(endpoint, { redirect: "error", signal: controller.signal }),
+      ),
+      {
+        deadline,
+        timeoutMs,
+        label: "browser endpoint discovery",
+        onTimeout: () => controller.abort(),
+      },
+    );
+  } catch (error) {
+    throw new Error(
+      `failed to fetch browser endpoint from ${endpoint}: ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+
+  if (response === null || typeof response !== "object" || response.ok !== true) {
+    throw buildHttpError(response);
+  }
+  if (typeof response.json !== "function") {
+    throw new Error("malformed browser endpoint response: missing JSON body reader");
+  }
+
+  let payload;
+  try {
+    payload = await awaitBeforeDeadline(Promise.resolve(response.json()), {
+      deadline,
+      timeoutMs,
+      label: "browser endpoint discovery JSON",
+      onTimeout: () => controller.abort(),
+    });
+  } catch (error) {
+    throw new Error(
+      `malformed browser endpoint JSON from ${endpoint}: ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+
+  const wsUrl = payload?.webSocketDebuggerUrl;
+  let parsed;
+  try {
+    parsed = parseLoopbackWebSocketUrl(wsUrl);
+  } catch (error) {
+    throw new Error(
+      `browser endpoint did not advertise a usable webSocketDebuggerUrl: ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+  return {
+    webSocketDebuggerUrl: wsUrl,
+    browser: typeof payload?.Browser === "string" ? payload.Browser : null,
+    protocolVersion:
+      typeof payload?.["Protocol-Version"] === "string"
+        ? payload["Protocol-Version"]
+        : null,
+    port: Number(parsed.port),
+  };
+}
+
+export async function waitForBrowserEndpoint(
+  port,
+  {
+    timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
+    pollMs = DEFAULT_POLL_MS,
+    fetchImpl = globalThis.fetch,
+    sleep = sleepWithTimer,
+  } = {},
+) {
+  validatePort(port);
+  validateDuration(timeoutMs, "timeoutMs", { allowZero: true });
+  validateDuration(pollMs, "pollMs", { allowZero: false });
+
+  const deadline = Date.now() + timeoutMs;
+  let lastError = new Error("no browser endpoint attempt completed");
+
+  while (true) {
+    try {
+      return await fetchBrowserEndpoint(port, {
+        fetchImpl,
+        timeoutMs: Math.max(1, Math.min(2000, deadline - Date.now() || 1)),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timed out after ${timeoutMs}ms waiting for the browser endpoint on 127.0.0.1:${port}: ${lastError.message}`,
+        { cause: lastError },
+      );
+    }
+    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
+  }
+}
+
 export async function waitForRendererTargets(
   port,
   {
@@ -297,6 +421,9 @@ export class CdpSession {
       WebSocketImpl = globalThis.WebSocket,
       commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
       connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+      // 连上后自动开启的协议域。browser 级会话传 [] —— browser target 没有
+      // Runtime/Page 域，照 page 那样 enable 会被协议直接拒绝。
+      domains = PAGE_DOMAINS,
     } = {},
   ) {
     parseLoopbackWebSocketUrl(webSocketDebuggerUrl);
@@ -305,11 +432,20 @@ export class CdpSession {
     }
     validateDuration(commandTimeoutMs, "commandTimeoutMs", { allowZero: false });
     validateDuration(connectTimeoutMs, "connectTimeoutMs", { allowZero: false });
+    if (
+      !Array.isArray(domains) ||
+      domains.some((domain) => typeof domain !== "string" || domain.length === 0)
+    ) {
+      throw new TypeError("domains must be an array of non-empty strings");
+    }
 
     this.webSocketDebuggerUrl = webSocketDebuggerUrl;
     this.WebSocketImpl = WebSocketImpl;
     this.commandTimeoutMs = commandTimeoutMs;
     this.connectTimeoutMs = connectTimeoutMs;
+    this.domains = [...domains];
+    this.eventListeners = new Map();
+    this.closeHandlers = new Set();
     this.socket = null;
     this.nextRequestId = 1;
     this.pending = new Map();
@@ -359,7 +495,7 @@ export class CdpSession {
       if (this.closed || this.socketOpen) return;
       this.clearConnectTimer();
       this.socketOpen = true;
-      Promise.all([this.send("Runtime.enable"), this.send("Page.enable")])
+      Promise.all(this.domains.map((domain) => this.send(`${domain}.enable`)))
         .then(() => {
           if (this.closed) return;
           this.opened = true;
@@ -402,7 +538,7 @@ export class CdpSession {
     return this.openPromise;
   }
 
-  send(method, params = {}, { timeoutMs = this.commandTimeoutMs } = {}) {
+  send(method, params = {}, { timeoutMs = this.commandTimeoutMs, sessionId = null } = {}) {
     if (this.closed) {
       return Promise.reject(this.terminalError ?? new Error("CDP session is closed"));
     }
@@ -430,7 +566,12 @@ export class CdpSession {
       this.pending.set(id, { method, resolve, reject, timer });
 
       try {
-        this.socket.send(JSON.stringify({ id, method, params }));
+        const message = { id, method, params };
+        // flatten 模式下，带 sessionId 的消息会被路由到对应子会话
+        if (typeof sessionId === "string" && sessionId.length > 0) {
+          message.sessionId = sessionId;
+        }
+        this.socket.send(JSON.stringify(message));
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -465,6 +606,67 @@ export class CdpSession {
     return response?.result?.value;
   }
 
+  /**
+   * 订阅 CDP 事件（服务端主动推的消息，没有 id）。
+   *
+   * 之前这里对无 id 的消息直接丢弃 —— 那时没人需要事件，而现在 auto-attach
+   * 完全靠 Target.attachedToTarget 驱动，必须能收到。
+   * 返回值是退订函数：调用它比在闭包里打标记可靠，避免 handler 堆积。
+   */
+  on(eventName, handler) {
+    if (typeof eventName !== "string" || eventName.length === 0) {
+      throw new TypeError("eventName must be a non-empty string");
+    }
+    if (typeof handler !== "function") {
+      throw new TypeError("handler must be a function");
+    }
+    let handlers = this.eventListeners.get(eventName);
+    if (!handlers) {
+      handlers = new Set();
+      this.eventListeners.set(eventName, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      const current = this.eventListeners.get(eventName);
+      if (!current) return;
+      current.delete(handler);
+      if (current.size === 0) this.eventListeners.delete(eventName);
+    };
+  }
+
+  /** 事件分发给监听器。单个 handler 抛错不影响其它 handler，也不该毒死连接。 */
+  dispatchEvent(message) {
+    const handlers = this.eventListeners.get(message?.method);
+    if (!handlers) return;
+    for (const handler of [...handlers]) {
+      try {
+        handler(message.params ?? {}, message);
+      } catch (error) {
+        process.stderr.write(
+          `AnonBuddy Skin：CDP 事件处理器抛错（${message.method}）：${errorMessage(error)}\n`,
+        );
+      }
+    }
+  }
+
+  /**
+   * 连接终止时回调（正常 close 或异常断开都会走）。常驻守护靠它决定何时重连。
+   * 和 on() 不同：这个只会触发一次，触发后即被清空。
+   */
+  onClose(handler) {
+    if (typeof handler !== "function") {
+      throw new TypeError("handler must be a function");
+    }
+    if (this.terminalError) {
+      // 已经断了：异步补一次，别让调用方卡在"注册了却永远等不到"
+      const error = this.terminalError;
+      queueMicrotask(() => handler(error));
+      return () => {};
+    }
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
+  }
+
   close() {
     if (this.closeStarted) return;
     this.terminate(new Error("CDP session closed by client"));
@@ -491,7 +693,11 @@ export class CdpSession {
       return;
     }
 
-    if (!Number.isInteger(message?.id)) return;
+    if (!Number.isInteger(message?.id)) {
+      // 没有 id：服务端事件（Target.attachedToTarget 等），交给订阅者
+      this.dispatchEvent(message);
+      return;
+    }
     const pending = this.pending.get(message.id);
     if (!pending) return;
 
@@ -510,6 +716,20 @@ export class CdpSession {
     this.terminalError = error;
     this.closed = true;
     this.socketOpen = false;
+
+    if (this.closeHandlers.size > 0) {
+      const handlers = [...this.closeHandlers];
+      this.closeHandlers.clear();
+      for (const handler of handlers) {
+        try {
+          handler(error);
+        } catch (handlerError) {
+          process.stderr.write(
+            `AnonBuddy Skin：CDP 关闭回调抛错：${errorMessage(handlerError)}\n`,
+          );
+        }
+      }
+    }
 
     const rejectOpen = this.rejectOpen;
     this.resolveOpen = null;

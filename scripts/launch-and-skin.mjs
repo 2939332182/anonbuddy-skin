@@ -15,22 +15,36 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { findNode, findWorkBuddyExe, portForExe, processNameFor } from "../src/platform/workbuddy-path.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// autoskin-launch.vbs 会把快捷方式上的参数**原样**转交给这个脚本，而
+// setup-autoskin.ps1 早期写进快捷方式的是 PowerShell 风格的单横线名
+// （-WorkBuddyExe / -Port）。这里做一层别名归一，让那些已经绑好的图标记即恢复。
+// ⚠️ 之前只认双横线：双击国内版图标会直接抛 "无法识别的参数：-WorkBuddyExe" 退出，
+//    而 vbs 是用**隐藏窗口**跑这个脚本的（shell.Run cmd, 0, False），
+//    报错一个字都传不到用户眼前 —— 症状就是"点了没反应，国内版打不开"。
+const ARG_ALIASES = {
+  "-WorkBuddyExe": "--exe",
+  "-Port": "--port",
+  "-Theme": "--theme",
+  "-Prefer": "--prefer",
+};
+
 function parseArgs(argv) {
+  const tokens = argv.map((token) => ARG_ALIASES[token] ?? token);
   const args = { exe: "", prefer: "", port: 0, theme: "last", watch: true, restart: true, timeout: 300 };
-  for (let i = 0; i < argv.length; i += 1) {
-    const a = argv[i];
-    if (a === "--exe") args.exe = argv[++i] ?? "";
-    else if (a === "--prefer") args.prefer = argv[++i] ?? "";
-    else if (a === "--port") args.port = Number(argv[++i] ?? 0);
-    else if (a === "--theme") args.theme = argv[++i] ?? "last";
-    else if (a === "--timeout") args.timeout = Number(argv[++i] ?? 300);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const a = tokens[i];
+    if (a === "--exe") args.exe = tokens[++i] ?? "";
+    else if (a === "--prefer") args.prefer = tokens[++i] ?? "";
+    else if (a === "--port") args.port = Number(tokens[++i] ?? 0);
+    else if (a === "--theme") args.theme = tokens[++i] ?? "last";
+    else if (a === "--timeout") args.timeout = Number(tokens[++i] ?? 300);
     else if (a === "--no-watch") args.watch = false;
     else if (a === "--no-restart") args.restart = false;
     else if (a === "--help" || a === "-h") args.help = true;
@@ -168,17 +182,29 @@ async function main() {
 
   // --- 4. 盯着后开的窗口 --------------------------------------------------
   // 5.6.x 起设置是独立 renderer 窗口，在我们注入之后才创建，新窗口是没皮肤的，
-  // 设置页里也就看不到换肤入口。watch-targets.mjs 轮询 CDP，发现新窗口就补一次。
-  // 代价是一个常驻 Node 进程（约 40 MB）—— 不想要就加 --no-watch。
+  // 设置页里也就看不到换肤入口。
+  //
+  // 默认走 skin-guard：连 browser 端点做 Target.setAutoAttach，新渲染进程一出生
+  // 就被接管 —— 首屏直接带皮肤（不再"先裸奔再换脸"）、没有 2 秒轮询延迟、
+  // 不需要反复 spawn 子进程。
+  // 找不到它就退回老的轮询版 watch-targets.mjs：两条路径职责完全相同，
+  // 只是实现不同，各自的头注释里写了取舍。
   if (args.watch) {
+    const guard = join(ROOT, "scripts", "skin-guard.mjs");
     const watcher = join(ROOT, "scripts", "watch-targets.mjs");
-    if (existsSync(watcher)) {
-      const already = listWatchers().some((line) => line.includes("watch-targets.mjs") && line.includes(String(port)));
+    const script = existsSync(guard) ? guard : existsSync(watcher) ? watcher : null;
+    if (script) {
+      const name = basename(script);
+      const already = listWatchers().some((line) => line.includes(name) && line.includes(String(port)));
       if (already) {
         console.log(`端口 ${port} 的补注入进程已经在跑了。`);
       } else {
-        spawn(node, [watcher, String(port)], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-        console.log("补注入进程已启动：后开的窗口会自动带上皮肤。");
+        spawn(node, [script, String(port)], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+        console.log(
+          name === "skin-guard.mjs"
+            ? "常驻守护已启动：后开的窗口一出生就带皮肤（无需等待）。"
+            : "补注入进程已启动：后开的窗口会自动带上皮肤。",
+        );
       }
     }
   }

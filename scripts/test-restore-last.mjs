@@ -48,7 +48,18 @@ const clickRow = async (id) => {
 
 const initial = await state();
 console.log("INITIAL=" + JSON.stringify(initial));
-const DISK = "genshin-dawn";
+// 磁盘主题名不能写死：主题包是会整批更换的（2026-09-28 就换过一轮），
+// 写死的老名字在换包之后必然找不到 —— 症状是 clickRow 直接抛 "找不到行"，
+// 看起来像注入坏了，其实只是测试跟着旧主题包走。改成从 CLI 实际列出的主题里取。
+const listResult = spawnSync(process.execPath, ["src/cli.mjs", "list"], { encoding: "utf8" });
+if (listResult.status !== 0) throw new Error(`cli list 失败：${listResult.stderr || listResult.status}`);
+const diskThemes = JSON.parse(listResult.stdout)
+  .map((theme) => theme?.id)
+  .filter((id) => typeof id === "string" && id.length > 0);
+if (diskThemes.length < 2) throw new Error(`至少需要两个磁盘主题，实际只有 ${diskThemes.length} 个`);
+const DISK = diskThemes[0];
+// 显式切换用一个不同的主题，才能证明 --theme 真的覆盖了 last
+const EXPLICIT = diskThemes[1];
 const custom = initial.customs[0];
 if (!custom) throw new Error("需要至少一个自定义主题才能测试");
 
@@ -59,7 +70,9 @@ try {
 
   // ---- 2. 重启（apply --theme last）→ 恢复 ----
   let applied = reapply("last");
-  t.check("last 模式注入成功", applied.applied === 1 && applied.restoreLast === true, JSON.stringify(applied));
+  // 用 >= 1 而不是 == 1：5.6.x 的设置是独立 renderer 窗口，设置开着的时候
+  // 一次 apply 会同时注入主窗口和设置窗口（applied: 2），那正是期望行为。
+  t.check("last 模式注入成功", applied.applied >= 1 && applied.restoreLast === true, JSON.stringify(applied));
   await sleep(200);
   t.check("重启后恢复磁盘主题", (await state()).active === DISK, String((await state()).active));
 
@@ -90,12 +103,12 @@ try {
   t.check("失效记录被覆盖成实际生效的主题", stale.lastTheme === "aisu", String(stale.lastTheme));
 
   // ---- 6. 显式指定主题时不受 last 影响 ----
-  reapply("wuthering-echo");
+  reapply(EXPLICIT);
   await sleep(200);
-  t.check("显式 --theme 仍然强制生效", (await state()).active === "wuthering-echo", String((await state()).active));
+  t.check("显式 --theme 仍然强制生效", (await state()).active === EXPLICIT, String((await state()).active));
   reapply("last");
   await sleep(200);
-  t.check("last 会跟着显式切换更新", (await state()).active === "wuthering-echo");
+  t.check("last 会跟着显式切换更新", (await state()).active === EXPLICIT, String((await state()).active));
 } finally {
   // 收尾：恢复用户原本的激活主题与别名，并把页面交回给 lastTheme 机制
   await evaluate(`(() => {

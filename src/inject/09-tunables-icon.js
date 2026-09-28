@@ -229,7 +229,14 @@
   // 两者都可能失效（主题被删 / WE 条目换机器后不存在），所以逐级回退，最后才用 CLI 指定的主题。
   const bootRaw = data.restoreLast ? readBootTheme() : null;
   const bootOk = typeof bootRaw === "string" && bootRaw !== "" && bootRaw.indexOf("we-") !== 0 && canApplyTheme(bootRaw);
-  const preferred = data.restoreLast ? ((bootOk ? bootRaw : null) ?? (readLastTheme() ?? currentSkin)) : null;
+  // 外部状态文档里的当前皮肤（Node 侧维护的镜像，见 src/active-state.mjs）。
+  // ⚠️ 它排在 LAST_KEY **之后**，不抢权威：用户是在这个页面里换皮肤的，
+  //    localStorage 永远比镜像新。它只在本地记录不存在或已失效时兜底
+  //    （清过缓存、跨会话新开的第一个窗口、以及守护在新文档里注入的场合）。
+  //    WE 主题（we-xxx）不在 data.themes 里，判定要单独放行，和 LAST_KEY 一致。
+  const hintValue = typeof data.activeHint === "string" && data.activeHint !== "" ? data.activeHint : null;
+  const hintOk = hintValue !== null && (hintValue.indexOf("we-") === 0 || canApplyTheme(hintValue));
+  const preferred = data.restoreLast ? ((bootOk ? bootRaw : null) ?? (readLastTheme() ?? (hintOk ? hintValue : null) ?? currentSkin)) : null;
   // WE 主题的 id 形如 we-<条目ID>，不在 data.themes / customThemes 里，要单独恢复
   const preferredWe = typeof preferred === "string" && preferred.indexOf("we-") === 0
     ? weItems.find((item) => weThemeId(item) === preferred)

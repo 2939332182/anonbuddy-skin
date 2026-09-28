@@ -99,7 +99,14 @@ function Get-LaunchEntries {
       ForEach-Object {
         try {
           $sc = $shell.CreateShortcut($_.FullName)
-          if ($sc.TargetPath -and $sc.TargetPath -ieq $ExePath) {
+          # Two shapes count as "points at this executable":
+          #   1. a plain shortcut aimed straight at the exe (never bound yet);
+          #   2. one ALREADY bound to the silent launcher and carrying this exe in
+          #      its arguments. Without case 2 a bound shortcut can never be touched
+          #      again -- its TargetPath is wscript.exe, not the app -- so an
+          #      outdated argument format would stay outdated forever.
+          $boundToThisExe = $sc.TargetPath -ieq $WScript -and $sc.Arguments -like '*autoskin-launch.vbs*' -and $sc.Arguments -like "*$ExePath*"
+          if ($sc.TargetPath -and ($sc.TargetPath -ieq $ExePath -or $boundToThisExe)) {
             $found.Add([pscustomobject]@{
               Kind   = 'Shortcut'
               Where  = $_.FullName
@@ -140,19 +147,47 @@ function Get-LaunchEntries {
 function Write-StateFile {
   param($Entries, [string]$Exe, [int]$P)
   if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Force -Path $StateDir | Out-Null }
-  $state = [pscustomobject]@{
+
+  # One record per executable. Binding the second product line must not erase
+  # the rollback info of the first one: rebinding the same exe replaces only
+  # that exe's record, every other record is carried over untouched.
+  $kept = @()
+  $existing = Read-StateFile
+  if ($existing) {
+    $kept = @($existing.installs | Where-Object { $_.exe -and ($_.exe -ine $Exe) })
+  }
+
+  $record = [pscustomobject]@{
     installedAt = (Get-Date).ToString('s')
     exe         = $Exe
     port        = $P
     vbs         = $Vbs
     entries     = $Entries
   }
-  $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $StatePath -Encoding UTF8
+
+  $state = [pscustomobject]@{
+    version  = 2
+    installs = @($kept) + @($record)
+  }
+  $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $StatePath -Encoding UTF8
 }
 
 function Read-StateFile {
-  if (Test-Path -LiteralPath $StatePath) {
-    return Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+  if (-not (Test-Path -LiteralPath $StatePath)) { return $null }
+  try {
+    $raw = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+  } catch {
+    Write-Warning "State file is unreadable, ignoring it: $($_.Exception.Message)"
+    return $null
+  }
+  $props = @($raw.PSObject.Properties.Name)
+  if ($props -contains 'installs') {
+    return [pscustomobject]@{ installs = @($raw.installs) }
+  }
+  # Legacy layout written before multi-install support: the root object WAS
+  # the single install record.
+  if ($props -contains 'entries') {
+    return [pscustomobject]@{ installs = @($raw) }
   }
   return $null
 }
@@ -161,13 +196,22 @@ function Read-StateFile {
 
 if ($Undo) {
   $state = Read-StateFile
-  if (-not $state) {
+  if (-not $state -or @($state.installs).Count -eq 0) {
     Write-Host "No recorded install found at $StatePath - nothing to undo."
     exit 0
   }
   $shell = New-Object -ComObject WScript.Shell
   $restored = 0
-  foreach ($entry in $state.entries) {
+
+  # Every bound executable carries its own record; undo restores all of them,
+  # not just the most recently bound product line.
+  $allEntries = @()
+  foreach ($install in @($state.installs)) {
+    if ($install.exe) { Write-Host "Unbinding $($install.exe) (port $($install.port))" }
+    $allEntries += @($install.entries)
+  }
+
+  foreach ($entry in $allEntries) {
     try {
       if ($entry.Kind -eq 'Shortcut') {
         $backup = Join-Path $BackupDir ([IO.Path]::GetFileName($entry.Where))
@@ -239,7 +283,12 @@ if ($ListOnly) {
   exit 0
 }
 
-$vbsArgs = "-WorkBuddyExe `"$WorkBuddyExe`" -Port $Port"
+# These arguments go to autoskin-launch.vbs, which forwards them **verbatim** to
+# launch-and-skin.mjs -- and that script only understands double-dash options.
+# Writing -WorkBuddyExe / -Port here used to break the whole double-click chain
+# silently: the launcher threw "unrecognized argument" inside a hidden window,
+# so the shortcut just looked dead (China build "would not open").
+$vbsArgs = "--exe `"$WorkBuddyExe`" --port $Port"
 $newValue = "`"$WScript`" `"$Vbs`" $vbsArgs"
 
 if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null }
@@ -248,7 +297,13 @@ $shell = New-Object -ComObject WScript.Shell
 $changed = New-Object System.Collections.Generic.List[object]
 
 foreach ($entry in $entries) {
-  if ($entry.Args -like "*autoskin-launch.vbs*") {
+  # Only skip entries already bound **in the current argument format**. An entry
+  # bound with the older single-dash spelling (-WorkBuddyExe / -Port) has to be
+  # rewritten: the launcher tolerates that spelling only as a compatibility alias,
+  # but shortcuts we generate ourselves should carry the canonical form.
+  $bound = $entry.Args -like '*autoskin-launch.vbs*'
+  $currentFormat = ($entry.Args -like '*--exe*') -and ($entry.Args -like '*--port*')
+  if ($bound -and $currentFormat) {
     Write-Host "  skip (already bound): $($entry.Where)"
     continue
   }
