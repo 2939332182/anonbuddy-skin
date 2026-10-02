@@ -59,6 +59,7 @@
 | `packaging/build-package.mjs` | 打包入口 |
 | `packaging/zip.mjs` | 自己实现的 ZIP 写入器 |
 | `tools/repkg/RePKG.exe` | 解场景壁纸，MIT，随仓库分发 |
+| `vendor/webwallgl/` | 场景壁纸的实时渲染器（MIT，随包分发、运行期不联网）；`scripts/sync-webwallgl.mjs` 负责同步与哈希校验，**副本不许就地改** |
 | `dist/` | 打包产物，已 gitignore |
 
 ## 常用命令
@@ -97,7 +98,26 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 
 包名规则 `chihayaanon-skin-<版本>-<cn|intl>.zip`，两个包插件代码相同，只有启动器预设的主程序名和端口不同。
 
+**场景壁纸实测**（要窗口在前台 —— 隐藏时 rAF 不跑、`mount` 不会 resolve；会反复切壁纸，收尾自动还原）：
+
+```bash
+node scripts/verify-wwgl.mjs --port 9333                  # 出画/切换/暂停恢复/音量/离开/连点幂等，31 项
+node scripts/verify-wwgl.mjs --port 9334 --shot-dir outputs/wwgl-cn
+node scripts/probe-wwgl.mjs --port 9333 --render <条目id>  # 单次切场景并看读数
+node scripts/probe-settings-window.mjs --port 9334 --open  # 设置独立窗口专项（要先有守护在跑）
+node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副本没被就地改
+```
+
 ## 维护史
+
+**2026-10-03（v1.0.5）**
+
+- **场景壁纸从「静帧」升级成「真渲染」** —— 接上 WebWallGL 1.4.2（随包 vendored 在 `vendor/webwallgl/`，运行时按需 `<script src>` 加载，不内联进注入 payload）：静态 4K 贴图先铺 → 后台解析 pkg → 首帧就绪后 450ms 淡入顶替；四级降级链（实时渲染 → 静态 4K → 工坊预览图 → 主题取色渐变）保证**任何情况下都不是黑屏**
+- 暂停/恢复/音量走实例 API（不重建实例），`releaseWebWallGL()` 进 `dispose()`，反复换壁纸不叠渲染循环
+- 新增工具：`scripts/sync-webwallgl.mjs`（vendored 副本同步 + 哈希校验）、`scripts/verify-wwgl.mjs`（两支产品线各跑一遍的实测）、`scripts/probe-wwgl.mjs` / `probe-settings-window.mjs`（探针）
+- 实测结果：国际版 **31/31**、国内版 **30/31**（唯一失败是实测脚本自己的收尾 bug，已修）、设置独立窗口专项 **9/9**
+- 引擎选 1.4.2 而不是 2.0.2：后者连续创建/销毁渲染实例会泄漏，第 7 个实例起全挂（34 个包只过 1 个）；理由与哈希记在 `vendor/webwallgl/.upstream.json`
+- 包体积从 2.80MB 涨到 2.96MB（+160KB 压缩后），换来场景壁纸的动画与交互
 
 **2026-09-27/28（到 v1.0.2 为止）**
 
@@ -150,6 +170,23 @@ node packaging/build-package.mjs --edition cn       # 只出一个
 **已绑定的快捷方式里 `TargetPath` 是 `wscript.exe`，不再是 app 的 exe。** `Get-LaunchEntries` 原本只匹配 `TargetPath -ieq $ExePath`，于是**绑定过的入口再也不会被识别** —— 参数格式过期也永远改不回来（实测：重跑绑定只动到了 Run 键，桌面图标纹丝不动）。现在同时匹配"已指向本启动器且参数里带着这个 exe"的形态，`skip (already bound)` 也从"凡绑定就跳过"改成"只在参数已是当前格式时才跳过"。
 
 **`Page.addScriptToEvaluateOnNewDocument` 只对**之后**创建的文档生效，而窗口从 `about:blank` 走到真实页面可能就发生在"注册"这几毫秒里。** 实测（2026-09-29）：国内版设置窗口的日志停在「已预置首屏脚本 10970EF6（等待导航）」，之后杳无音信，设置里也就看不到插件入口；**手动 reload 一次皮肤立刻全好** —— 这说明注册机制本身没问题，只是那一次导航被错过了。守护现在注册完之后会重新问一次 `location.href`：窗口若仍被 `waitForDebuggerOnStart` 暂停着，`Runtime.evaluate` 会因为还没有执行上下文而失败（那就是真的还没导航，继续等首屏脚本即可）；否则说明已经错过，补一次即时注入。
+
+**`Promise.race` 的超时兜底挂在正常路径上，会把刚成功的那个实例销毁（2026-10-03，1.0.5 实测抓到）。**
+
+WebWallGL 的 `mount()` 只在**首帧画出来之后**才 resolve，而窗口隐藏时 rAF 不跑、首帧永远不来 ——
+所以给它加了 `Promise.race` 超时。但"接住迟到实例并销毁"的那个 `.then` 回调**注册在 race 外侧**：
+先注册的微任务排在 `await` 续体之前，那一刻 `wwglInstance` 还没赋值，于是
+`late !== wwglInstance` 恒为真 → **刚 mount 好的实例被立刻 `destroy()`**。
+
+症状极具迷惑性，值得记住：mount 正常 resolve、日志打「渲染就绪」、canvas 尺寸也对，
+但 `wp.info` 永远是 `null`、`stats.fps` 恒为 0。而**探针容器里单独调 `mount()` 一切正常**
+（fps 30、info 完整）—— 因为那条路绕过了这段代码，差点被判成"库在这台机器上不行"。
+真相是靠对照实验切出来的：同一容器、同一字节、同一 key，走我们的 `renderScene` 就废，
+直调就好。
+
+**教训：兜底逻辑要注册在它真正负责的那条分支里**（这里是 `catch` 的超时分支），
+不要挂在共享路径上。另外，`we.waitReady()` 那种"只判断存在实例"的等待是**不可靠的**
+（上一个实例还没释放时就返回 true），实测脚本要等的是"实例的条目 id 等于目标"。
 
 ## 已知限制与待办
 
@@ -216,6 +253,7 @@ Release 说明的写法参考：面向下载者，不写代码结构。参考同
 
 | tag | 附件 |
 |:---|:---|
+| v1.0.5 | `chihayaanon-skin-1.0.5-cn.zip` / `-intl.zip`（场景壁纸真渲染 + 四级降级链） |
 | v1.0.4 | `chihayaanon-skin-1.0.4-cn.zip` / `-intl.zip`（一键换肤顺手接好启动入口，用户零额外步骤） |
 | v1.0.3 | `chihayaanon-skin-1.0.3-cn.zip` / `-intl.zip`（事件驱动首屏注入 + 状态文档 + 换肤事务） |
 | v1.0.2 | `chihayaanon-skin-1.0.2-cn.zip` / `-intl.zip` |

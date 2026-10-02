@@ -10,6 +10,7 @@ import { buildSkinCss } from "./skin-css.mjs";
 import { buildSkinMenuScript, CSS_SENTINELS } from "./skin-menu.mjs";
 import { scanAll as scanWeLibrary, toFileUrl } from "./we-library.mjs";
 import { readCachedHero, resolveCacheRoot, resolveRepkg } from "./we-extract.mjs";
+import { resolveWebWallGLUrl } from "./webwallgl-vendor.mjs";
 
 const STYLE_ID = "anonbuddy-skin-style";
 const MENU_ID = "anonbuddy-skin-menu";
@@ -79,14 +80,22 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
   // 扫描失败不阻塞换肤，只是面板里少一组。
   let resolvedWe = weItems;
   let weMeta = null;
+  const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  // WebWallGL（vendored 副本）的 file:// 地址：渲染进程需要 scene 壁纸时才按需
+  // <script src> 加载它。**不内联进注入脚本** —— 950KB 每次 apply 都推过 CDP 不可接受，
+  // 而按 URL 加载让 payload 只多几十字节，且只有真用 scene 壁纸的用户付这份成本。
+  let wwglUrl = null;
+  try {
+    wwglUrl = (deps.resolveWebWallGLUrl ?? resolveWebWallGLUrl)({ sourceRoot });
+  } catch {
+    /* 库路径解析不了只是少了 scene 实时渲染这一档，不影响换肤 */
+  }
   if (!Array.isArray(resolvedWe)) {
     try {
       const scanned = await (deps.scanWeLibrary ?? scanWeLibrary)();
       const toUrl = deps.toFileUrl ?? toFileUrl;
       const cacheRoot = (deps.resolveCacheRoot ?? resolveCacheRoot)();
-      const repkgPath = (deps.resolveRepkg ?? resolveRepkg)({
-        sourceRoot: join(dirname(fileURLToPath(import.meta.url)), ".."),
-      });
+      const repkgPath = (deps.resolveRepkg ?? resolveRepkg)({ sourceRoot });
       // scene 条目：如果用户跑过 we-extract，就把解出来的原始贴图（通常 4K）当 hero 用；
       // 没跑过就继续用创意工坊缩略图（1024x1024）。这一步只读缓存，不触发解包。
       const readHero = deps.readCachedHero ?? readCachedHero;
@@ -105,6 +114,10 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
           // 高清贴图：只有 scene 条目、且用户跑过 we-extract 才有
           heroUrl: cached ? toUrl(cached.heroPath) : null,
           heroSize: cached ? cached.size : null,
+          // scene 壁纸的 pkg：渲染层用它做 WebWallGL 实时渲染（file:// 直读，已百分号编码）。
+          // ⚠️ 只传路径不传字节：pkg 动辄几十 MB，渲染进程自己 fetch 才不碰 payload 体积。
+          pkgUrl: item.pkgPath ? toUrl(item.pkgPath) : null,
+          pkgBytes: item.pkgBytes ?? 0,
           // 能不能升级：装了 RePKG 且是 scene 条目
           canExtract: Boolean(repkgPath && item.pkgPath),
         };
@@ -170,6 +183,9 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
     weItems: resolvedWe,
     // RePKG 是否可用（面板据此提示可以升级到 4K）
     weRepkgAvailable: Boolean(weMeta && weMeta.repkgPath),
+    // WebWallGL 库的 file:// 地址（vendored 副本，见 vendor/webwallgl/.upstream.json）。
+    // null = 没有副本，渲染层会静默留在静态图上。
+    wwglUrl,
     // 外部状态文档里的当前皮肤 + 守护挂的上报通道名（见 active-state.mjs / skin-guard.mjs）
     activeHint,
     reportBinding: REPORT_BINDING,

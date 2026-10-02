@@ -1,0 +1,19 @@
+{
+  "name": "webwallgl",
+  "version": "1.4.2",
+  "file": "webwallgl-1.4.2.global.min.js",
+  "entry": "WebWallGL",
+  "bytes": 950112,
+  "sha256": "A40B7295C251D17810B0503273DA82218BD3C86A62E98D879EC09D3C35FABE23",
+  "format": "umd-global-min",
+  "license": "MIT",
+  "repository": "https://github.com/oneincase/webwallgl",
+  "npm": "webwallgl",
+  "tarball": "https://registry.npmjs.org/webwallgl/-/webwallgl-1.4.2.tgz",
+  "integrity": "sha512-gXYrv9HATvBsnYdNYunfQ8EeJ3bHDWYskvEkUTZlzHSGXBr5Fhw9TYtj//zJvQ+7fEMnjVC+RN4i38wHuR8iFg==",
+  "tarballPath": "package/webwallgl.global.min.js",
+  "syncedAt": "2026-10-03",
+  "note": "vendored 副本不许就地改；同步与校验走 scripts/sync-webwallgl.mjs。选 1.4.2 而非 2.0.2：本机实测 2.0.2 连续创建/销毁渲染实例会泄漏，第 7 个实例起全部挂死（34 个包只过 1 个），1.4.2 是 34/34 全过。",
+  "whyVendored": "用户装完即可用，不引运行期外网依赖；同时不把 950KB 内联进注入 payload，改由渲染进程按需 <script src> 加载本地副本。",
+  "usage": "UMD：加载后挂 window.WebWallGL；mount(容器, { source: bytesSource(bytes, null, key), fps, volume, autoplay })"
+}

@@ -71,7 +71,7 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
-export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, activeHint = null, reportBinding = null }) {
+export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, wwglUrl = null, activeHint = null, reportBinding = null }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
   }
@@ -103,6 +103,9 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     weItems: Array.isArray(weItems) ? weItems.filter((x) => x && typeof x.id === "string" && typeof x.fileUrl === "string") : [],
     // 装了 RePKG 就能把 scene 的静态图从 1K 缩略图升级到 4K 原图（见 we-extract.mjs）
     weRepkgAvailable: Boolean(weRepkgAvailable),
+    // WebWallGL 库的 file:// 地址（vendored 副本）。只传地址不传脚本：
+    // 渲染层在第一次真要用 scene 壁纸时才 <script src> 它，payload 不膨胀。
+    wwglUrl: typeof wwglUrl === "string" && wwglUrl.length > 0 && /^file:\/\//i.test(wwglUrl) ? wwglUrl : null,
     // 旧版单主题：id 固定 custom-upload，键 workbuddyCustomTheme（首次运行会迁移进 customListKey）
     customId: "custom-upload",
     storageKey: "workbuddyCustomTheme",

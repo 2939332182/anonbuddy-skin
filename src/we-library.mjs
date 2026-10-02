@@ -5,7 +5,8 @@
 //
 // 分类规则（来自实测，详见 docs/WE-INTEGRATION.md）：
 //   · type=video  → mp4/webm 在**工程根目录**，由 project.json 的 file 字段指向 → 可直接当动效背景
-//   · type=scene  → 素材打包在 scene.pkg，需要 RePKG 才能解（本机没有）→ 只能退化成 preview 静态图
+//   · type=scene  → 素材打包在 scene.pkg。两条升级路线：RePKG 解出 4K 静态贴图（we-extract.mjs），
+//                   或者渲染层用 WebWallGL 直读 pkg 做实时渲染。所以这里要给出 pkgPath/pkgBytes。
 //   · type=web    → files/index.html，不能当背景
 //   · 无 type 且有 preset + dependency → 预设（配置覆盖层），不是独立壁纸，跳过
 //
@@ -174,10 +175,14 @@ export const scanWorkshopDir = async (dir) => {
     // scene 额外带上 scene.pkg 路径 —— 用户提供了 RePKG 时可以解出原始 4K 贴图（见 we-extract.mjs）
     if (preview || rawType === "scene") {
       const pkgPath = join(entryDir, "scene.pkg");
+      const hasPkg = rawType === "scene" && existsSync(pkgPath);
+      // pkg 体积是渲染层的预判依据：几十 MB 的包解/读都要付代价，值得先知道
+      const pkgBytes = hasPkg ? await stat(pkgPath).then((s) => s.size, () => 0) : 0;
       out.push({
         id, title, kind: "preview", path: preview ?? pkgPath, size: previewSize, rawType, rating,
         previewPath: preview, previewSize,
-        pkgPath: rawType === "scene" && existsSync(pkgPath) ? pkgPath : null,
+        pkgPath: hasPkg ? pkgPath : null,
+        pkgBytes,
       });
     }
   }

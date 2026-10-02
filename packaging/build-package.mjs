@@ -55,7 +55,9 @@ const SCRIPTS = [
                           // src/platform/workbuddy-path.mjs，这份只为它服务
 ];
 
-const TREES = ["src", "themes", "tools", "assets"];
+// vendor/ 是运行时依赖（WebWallGL 渲染库，scene 壁纸实时渲染用），必须进包：
+// 用户装完即可用，不引运行期外网依赖。它由 scripts/sync-webwallgl.mjs 同步，不许就地改。
+const TREES = ["src", "themes", "tools", "assets", "vendor"];
 const ROOT_FILES = ["README.md", "package.json", "LICENSE", "SKILL.md", "apply-now.mjs"];
 
 // 模板里的 \{name\} 会被替换。注意 .bat 里还有 %~dp0 这类百分号语法，不受影响。
@@ -201,6 +203,7 @@ WorkBuddy 有两条产品线，装出来的东西不一样：
   src\\        插件本体（注入脚本，纯 JavaScript）
   themes\\     五款内置主题
   tools\\      解包工具 RePKG（MIT 许可）
+  vendor\\     WebWallGL 渲染库（MIT 许可），场景壁纸实时渲染用
   scripts\\    启动 / 还原 / 查找 / 自动化脚本
   README.md   完整说明（想深入了解看这个）
 

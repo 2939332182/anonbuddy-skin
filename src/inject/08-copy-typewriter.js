@@ -232,6 +232,10 @@
     // 卸载时把「皮肤接管」的声明撤掉，并解除外观护栏，让原生外观恢复自理
     enforceAppearanceGuard(null);
     document.documentElement.removeAttribute("data-skin");
+    // WebWallGL 必须真销毁：destroy 才会停渲染循环并释放 WebGL 上下文。
+    // 顺序必须在 bgLayer.remove() **之前** —— 反了就先摘掉容器、实例的循环还活着（幂等红线）。
+    try { releaseWebWallGL(); } catch {}
+    if (weGradientEl) { try { weGradientEl.remove(); } catch {} weGradientEl = null; }
     // 背景媒体层是我们插的节点，必须一起收掉（幂等红线：重复 apply 不能叠层）
     try { bgLayer?.remove(); } catch {}
     bgLayer = null;

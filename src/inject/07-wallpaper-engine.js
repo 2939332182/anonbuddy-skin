@@ -4,6 +4,10 @@
   //     → 零字节拷贝、零存储、零 payload 膨胀，不碰 localStorage 配额
   //   · 只传路径，绝不把媒体打进仓库（创意工坊内容版权归作者）
   //   · ⚠️ 这些主题**只在本机有效**，不可分享（面板上必须标注）
+  //
+  // scene（场景）壁纸不走 <video>：它是 WE 引擎解释的 scene.pkg。这一版把静态贴图路线
+  // 升级成"渐进增强"——静态 4K 贴图（或预览图）先铺上，WebWallGL 在后台解析 pkg、
+  // 出首帧后再淡入顶替。见本文件下方 WebWallGL 段与 docs 的集成方案。
   const WE_THEME_KEY = "anonbuddySkinWeTheme";
   const WE_PAUSED_KEY = "anonbuddySkinWePaused";
   const WE_FALLBACK_COLORS = { accent: "#24c9d7", secondary: "#ef8fd3", surface: "#f7fbff", text: "#17344f" };
@@ -12,6 +16,28 @@
 
   const weItems = Array.isArray(data.weItems) ? data.weItems : [];
   const weThemeId = (item) => "we-" + item.id;
+
+  // ---- 降级链第四档：主题取色渐变（永不为黑）----
+  // 前三档都可能落空：没跑过 we-extract、工坊缩略图本身缺失、路径失效。
+  // 这一档纯本地取色，不依赖任何文件 —— 只要换了主题，背景就一定有内容。
+  // 它只在**没有静态图**时出现：它是 bgLayer 的子元素，会盖住父层的 background-image。
+  let weGradientEl = null;
+  const applyWeGradient = (colors, needed) => {
+    if (!bgLayer) return;
+    if (!needed) {
+      if (weGradientEl) { try { weGradientEl.remove(); } catch (error) {} weGradientEl = null; }
+      return;
+    }
+    if (!weGradientEl) {
+      weGradientEl = document.createElement("div");
+      weGradientEl.dataset.wbWeGradient = "1";
+      weGradientEl.style.cssText = "position:absolute;inset:0;";
+      bgLayer.appendChild(weGradientEl);
+    }
+    weGradientEl.style.background =
+      "linear-gradient(135deg, " + colors.accent + " 0%, " + colors.secondary + " 52%, " + colors.surface + " 100%)";
+  };
+
   const readWeTheme = () => { try { return localStorage.getItem(WE_THEME_KEY) || null; } catch { return null; } };
   const writeWeTheme = (id) => { try { localStorage.setItem(WE_THEME_KEY, id || ""); } catch {} };
   const readWePaused = () => { try { return localStorage.getItem(WE_PAUSED_KEY) === "1"; } catch { return false; } };
@@ -73,6 +99,7 @@
     }
     applyVolume();
     syncBgVideoPlayback();
+    syncWwglVolume();
     syncWeUi();
   };
 
@@ -109,25 +136,182 @@
     if (playing && typeof playing.catch === "function") playing.catch(() => {});
   };
 
-  // 把视频挂进背景图层。非视频条目（静态预览）只需清掉旧视频 —— 图走 CSS 的 hero 槽位。
+  // ==================== WebWallGL：scene 壁纸真渲染（渐进增强）====================
+  // 设计原则：**静态贴图先上，渲染好了淡入顶替**。任何一步失败都静默留在静态图/渐变上，
+  // 用户不该知道背后发生了什么 —— 真渲染因此是一个可以随时安全放弃的"锦上添花"。
+  //
+  // 库走 vendored 副本（vendor/webwallgl/，950KB），运行时按需 <script src> 加载：
+  // 不内联进注入脚本（每次 apply 推 950KB 过 CDP 不可接受），而且只有真用 scene 壁纸的
+  // 用户才付这份成本。上游版本、哈希、以及"为什么锁 1.4.2 而不是 2.0.2"记在
+  // vendor/webwallgl/.upstream.json 里。
+  const wwglUrl = typeof data.wwglUrl === "string" && data.wwglUrl ? data.wwglUrl : null;
+  // mount 只在**首帧真画出来之后**才 resolve，而窗口被隐藏时浏览器不跑 rAF
+  // （最小化 / 收进托盘），首帧永远不来 —— 没有超时就会一直挂着。
+  // 取值是"最慢实测（复杂场景叠加皮肤负载 9.1s）× 数倍余量"，给慢机器和大包留够空间。
+  const WE_WWGL_MOUNT_TIMEOUT_MS = 60000;
+  let wwglLib = null;         // 库命名空间（只加载一次，之后所有 scene 复用）
+  let wwglLoading = null;     // 加载去重：连点几个 scene 不会重复插 <script>
+  let wwglInstance = null;    // 当前渲染实例
+  let wwglHolder = null;      // 承载 canvas 的容器
+  let wwglRenderId = null;    // 当前实例对应的 WE 条目 id
+  let wwglGeneration = 0;     // 世代号：每次释放自增，在飞的 renderScene 据此早退
+
+  const loadWebWallGL = () => {
+    if (wwglLib) return Promise.resolve(wwglLib);
+    if (wwglLoading) return wwglLoading;
+    if (!wwglUrl) return Promise.reject(new Error("没有 WebWallGL 地址"));
+    wwglLoading = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.dataset.wbWwgl = "1";
+      script.src = wwglUrl;
+      script.onload = () => {
+        if (window.WebWallGL) { wwglLib = window.WebWallGL; resolve(wwglLib); }
+        else reject(new Error("WebWallGL 未挂到 window"));
+      };
+      script.onerror = () => reject(new Error("库加载失败"));
+      document.head.appendChild(script);
+    }).catch((error) => { wwglLoading = null; throw error; });
+    return wwglLoading;
+  };
+
+  // 幂等释放：作废世代号 → destroy 实例 → 移除容器。
+  // destroy() 是唯一会停掉渲染循环并释放 WebGL 上下文的动作（浏览器同页上下文数量有限），
+  // 漏掉它 = 漏上下文 + 叠渲染循环，这是本项目的幂等红线（视频壁纸那轮踩过）。
+  const releaseWebWallGL = () => {
+    wwglGeneration += 1;
+    wwglRenderId = null;
+    if (wwglInstance) {
+      try { wwglInstance.destroy(); } catch (error) {}
+      wwglInstance = null;
+    }
+    if (wwglHolder) {
+      try { wwglHolder.remove(); } catch (error) {}
+      wwglHolder = null;
+    }
+    // 实例没了 → 暂停键也该跟着消失（按钮只在**真有东西可暂停**时出现）
+    try { syncWeButtons(); } catch (error) {}
+    return wwglGeneration;
+  };
+
+  // 暂停/恢复走实例 API，**绝不 destroy 重建**：重建要重新解析 pkg（复杂场景实测 9 秒起）
+  const syncWwglPlayback = () => {
+    if (!wwglInstance) return;
+    try {
+      if (wePaused) wwglInstance.pause();
+      else wwglInstance.resume();
+    } catch (error) {}
+  };
+
+  // 音量：scene 自带音频（场景内 BGM / 音频响应），静音开关未开时给 0
+  const syncWwglVolume = () => {
+    if (!wwglInstance) return;
+    try {
+      wwglInstance.setVolume(weSound ? Math.min(1, Math.max(0, weVolume / 100)) : 0);
+    } catch (error) {}
+  };
+
+  // 渲染一个 scene。**不要 await 它**：调用方（setBackgroundMedia）必须立刻返回。
+  const renderScene = async (item) => {
+    if (!wwglUrl || !item || !item.pkgUrl || !bgLayer) return;
+    const myId = item.id;
+    const myGeneration = releaseWebWallGL();
+    let holder = null;
+    // 每个 await 之后都要重新比对：用户可能已经切走（甚至切了两次）。
+    // 少了这道闸，快速连点几个壁纸时多个 mount 会并发挂上同一个图层。
+    const stale = () => myGeneration !== wwglGeneration || weActiveId !== myId;
+    try {
+      const lib = await loadWebWallGL();
+      if (stale()) return;
+
+      holder = document.createElement("div");
+      holder.dataset.wbWeScene = "1";
+      // opacity 从 0 起步：此刻静态 4K 贴图正在显示，canvas 先隐形，首帧出来才淡入
+      holder.style.cssText = "position:absolute;inset:0;opacity:0;transition:opacity .45s ease;pointer-events:none;";
+      bgLayer.appendChild(holder);
+      wwglHolder = holder;
+
+      // file:// 直读：渲染进程本身就是 file:// 页面（这条路径视频壁纸已验证过），零拷贝。
+      // key 参与库内解析缓存（切回同一场景不再重解析），所以用稳定的条目 id 拼。
+      const bytes = await (await fetch(item.pkgUrl)).arrayBuffer();
+      if (stale()) { try { holder.remove(); } catch (error) {} if (wwglHolder === holder) wwglHolder = null; return; }
+
+      let timeoutId = 0;
+      const mounting = lib.mount(holder, {
+        source: lib.bytesSource(bytes, null, "anonbuddy-we-" + myId),
+        fps: 30,   // 场景多是慢速动效，30fps 观感损失很小，GPU 直接省一半
+        volume: weSound ? Math.min(1, Math.max(0, weVolume / 100)) : 0,
+        autoplay: !wePaused,
+      });
+      let wp = null;
+      try {
+        wp = await Promise.race([
+          mounting,
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error("mount 超时 " + WE_WWGL_MOUNT_TIMEOUT_MS + "ms")),
+              WE_WWGL_MOUNT_TIMEOUT_MS,
+            );
+          }),
+        ]);
+      } catch (error) {
+        // 超时那条路：在飞的 mount 稍后仍可能成功，而那时它**没人接管** ——
+        // 必须自己接住并销毁，否则它会在容器上一直渲染（漏 WebGL 上下文，幂等红线）。
+        //
+        // ⚠️ 这个兜底**只能注册在超时分支里**。挂在 race 外侧的话，正常返回的实例也会被它
+        //    销毁：先注册的 .then 回调排在 await 续体**之前**，那一刻 wwglInstance 还没赋值，
+        //    所以"late !== wwglInstance"恒成立 → 刚 mount 好的实例被立刻 destroy()。
+        //    症状极具迷惑性：mount 正常 resolve、日志打「渲染就绪」、canvas 尺寸也对，
+        //    但 info 永远是 null、stats.fps 恒为 0（实测在 1.0.5 实测阶段抓到这个）。
+        mounting.then((late) => { try { late.destroy(); } catch (innerError) {} }).catch(() => {});
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      // mount 完成期间又被切走：立刻销毁，不留泄漏
+      if (stale()) { try { wp.destroy(); } catch (error) {} return; }
+
+      wwglInstance = wp;
+      wwglRenderId = myId;
+      // 首帧已出 → 淡入，静态图被顶替。用户只看到"更顺滑了"，看不到切换过程。
+      requestAnimationFrame(() => { if (holder) holder.style.opacity = "1"; });
+      syncWeButtons();
+      console.log("[anonbuddy] scene 渲染就绪", myId, JSON.stringify(wp.info));
+    } catch (error) {
+      // 静默降级：静态图（或渐变兜底）还在，用户无感
+      console.warn("[anonbuddy] scene 渲染失败，保持静态贴图", item.id, error && error.message);
+      try { if (holder) holder.remove(); } catch (innerError) {}
+      if (wwglHolder === holder) wwglHolder = null;
+    }
+  };
+
+  // 把媒体挂进背景图层。
+  //   · video：<video> 顶上去（原逻辑）
+  //   · scene：静态贴图已由 CSS hero 槽位顶上，这里**异步**升级成 WebWallGL 真渲染
+  //   · 其余：只需清掉旧的视频/GL —— 图走 CSS 的 hero 槽位
   const setBackgroundMedia = (item) => {
     releaseBgVideo();
-    if (!bgLayer || !item || item.kind !== "video") return;
-    const video = document.createElement("video");
-    video.dataset.wbWeVideo = "1";
-    video.src = item.fileUrl;
-    video.loop = true;
-    video.autoplay = true;
-    video.muted = !weSound;
-    video.volume = Math.min(1, Math.max(0, weVolume / 100));
-    video.defaultMuted = !weSound;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    video.preload = "auto";
-    video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;";
-    bgLayer.appendChild(video);
-    bgVideo = video;
-    syncBgVideoPlayback();
+    releaseWebWallGL();     // 先收掉上一轮的 GL：反复换壁纸不能叠渲染循环（幂等红线）
+    if (!bgLayer || !item) return;
+    if (item.kind === "video") {
+      const video = document.createElement("video");
+      video.dataset.wbWeVideo = "1";
+      video.src = item.fileUrl;
+      video.loop = true;
+      video.autoplay = true;
+      video.muted = !weSound;
+      video.volume = Math.min(1, Math.max(0, weVolume / 100));
+      video.defaultMuted = !weSound;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      video.preload = "auto";
+      video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;";
+      bgLayer.appendChild(video);
+      bgVideo = video;
+      syncBgVideoPlayback();
+      return;
+    }
+    // ⚠️ 不 await renderScene：换肤必须立刻返回，慢的部分由静态图遮着在后台跑
+    if (item.rawType === "scene" && item.pkgUrl) renderScene(item);
   };
 
   // 从 localStorage 读出当前该用哪个 WE 壁纸并真正换过去。
@@ -151,12 +335,14 @@
     // 唯一入口（音量不为 0 就自动播放，见 setWeVolume）。
     if (wePaused && weVolume !== 0) setWeVolume(0, { fromPause: true });
     syncBgVideoPlayback();
+    syncWwglPlayback();
     syncWeButtons();
   };
 
   const applyWeTheme = async (item) => {
     const id = weThemeId(item);
-    // hero 优先用 RePKG 解出来的原始贴图（通常 4K），没有才退回创意工坊缩略图（1K）
+    // 降级链（自上而下）：① WebWallGL 实时渲染 ② 解出来的静态 4K 贴图 ③ 工坊预览图
+    // ④ 主题取色渐变兜底。前三档都可能拿不到，第四档保证用户看到的绝不是黑屏。
     const heroSource = item.heroUrl || item.previewUrl || null;
     const colors = await paletteFromUrl(heroSource);
     const hero = heroSource || WE_BLANK;
@@ -164,8 +350,11 @@
     style.textContent = buildCustomCss(hero, colors, id);
     document.documentElement.dataset.anonbuddySkin = id;
     applyMode(colors.surface);
-    setBackgroundMedia(item);
+    applyWeGradient(colors, !heroSource);
+    // ⚠️ weActiveId 必须在 setBackgroundMedia 之前落好：renderScene 靠它做"是否已被切走"
+    //    的世代校验，晚一步就会把自己误判成过期请求而放弃渲染。
     weActiveId = item.id;
+    setBackgroundMedia(item);
     writeWeTheme(item.id);
     paint(id);
     writeLastTheme(id);
@@ -175,9 +364,12 @@
   };
 
 
-  // 离开 WE 主题（切到普通主题 / 选原生）时必须收掉视频与状态，否则视频会在后台一直解码
+  // 离开 WE 主题（切到普通主题 / 选原生）时必须收掉视频、GL 与状态，
+  // 否则视频会在后台一直解码，而 GL 会连着渲染循环一起活着（幂等红线）
   const leaveWeTheme = () => {
     releaseBgVideo();
+    releaseWebWallGL();
+    if (weGradientEl) { try { weGradientEl.remove(); } catch (error) {} weGradientEl = null; }
     if (weActiveId !== null) { weActiveId = null; writeWeTheme(null); }
     syncWeList();
     syncWeButtons();
@@ -196,8 +388,13 @@
   });
 
   const syncWeButtons = () => {
-    const isVideoWe = weActiveId !== null && (weItems.find((x) => x.id === weActiveId)?.kind === "video");
-    weToggleBtn.style.display = isVideoWe ? "block" : "none";
+    const active = weActiveId === null ? null : weItems.find((x) => x.id === weActiveId);
+    // 按钮只在**真有东西可暂停**时出现：视频有 <video>，scene 要有已就绪的 GL 实例。
+    // 不用"这个条目理论上能渲染"来预判 —— 引擎没就绪时按了没反应，那不叫可用；
+    // 而且 mount 还没 resolve 时按钮就出现，会让人以为壁纸是"静态图播放失败"。
+    const sceneReady = Boolean(wwglInstance && wwglRenderId === weActiveId);
+    const playable = Boolean(active && (active.kind === "video" || sceneReady));
+    weToggleBtn.style.display = playable ? "block" : "none";
     weToggleBtn.textContent = wePaused ? "\u25b6" : "\u23f8";
     weToggleBtn.title = wePaused ? "继续播放动态壁纸" : "暂停动态壁纸";
     if (wePaneToggle) {

@@ -272,6 +272,14 @@
       },
       themeKey: WE_THEME_KEY,
       pausedKey: WE_PAUSED_KEY,
+      // 声音与音量：scene 渲染走自己的音频通道（syncWwglVolume），
+      // 这一组让实测脚本能从外面把音量/静音推过去并读回实际值。
+      sound: () => weSound,
+      volume: () => weVolume,
+      setSound: (value) => { setWeSound(value); return weSound; },
+      setVolume: (value) => { setWeVolume(value); return weVolume; },
+      soundKey: WE_SOUND_KEY,
+      volumeKey: WE_VOLUME_KEY,
       /** 背景图层里的视频节点（没有则为 null） */
       videoEl: () => document.querySelector("#" + BG_LAYER_ID + " > video[data-wb-we-video]"),
       videoState: () => {
@@ -285,6 +293,34 @@
       },
       /** 悬浮小图标旁的暂停键（测试断言它的显隐与文案） */
       toggleBtn: () => document.querySelector("button[data-wb-we-toggle]"),
+      // ---- WebWallGL（scene 实时渲染）----
+      // 这一组是给实测脚本用的"能自证"的读数：渲染是否就绪、canvas 是否真的进了图层、
+      // 上下文有没有被收掉。没有这些，测试只能靠截图肉眼看。
+      wwglUrl: () => wwglUrl,
+      wwglLibLoaded: () => Boolean(wwglLib),
+      wwglActive: () => Boolean(wwglInstance),
+      wwglId: () => wwglRenderId,
+      wwglGeneration: () => wwglGeneration,
+      wwglStats: () => {
+        if (!wwglInstance) return null;
+        try { return { fps: wwglInstance.stats?.fps ?? null, running: wwglInstance.stats?.running ?? null, info: wwglInstance.info ?? null }; }
+        catch (error) { return null; }
+      },
+      /** scene 渲染容器（没有则为 null） */
+      sceneEl: () => document.querySelector("#" + BG_LAYER_ID + " > div[data-wb-we-scene]"),
+      sceneCanvas: () => document.querySelector("#" + BG_LAYER_ID + " > div[data-wb-we-scene] canvas"),
+      /** 第四档兜底渐变层（没有则为 null） */
+      gradientEl: () => document.querySelector("#" + BG_LAYER_ID + " > div[data-wb-we-gradient]"),
+      /** 一键等渲染就绪：实测脚本用它避免 sleep 猜时间 */
+      waitReady: (timeoutMs) => new Promise((resolve) => {
+        const deadline = Date.now() + (Number(timeoutMs) || 20000);
+        const tick = () => {
+          if (wwglInstance) { resolve(true); return; }
+          if (Date.now() > deadline) { resolve(false); return; }
+          setTimeout(tick, 200);
+        };
+        tick();
+      }),
     },
     // 两个外观调节项（侧边栏毛玻璃 / 背景图模糊）—— 供测试与脚本化调用
     tunables: {
