@@ -63,6 +63,12 @@ const SKIP_PUSH = flag("--skip-push");
 const SKIP_TAG = flag("--skip-tag");
 const SKIP_RELEASE = flag("--skip-release");
 const MESSAGE = value("--message", TAG ? `release: ${TAG}` : "release");
+// ⚠️ 显式文件清单（不给时按 --diff-base 算）
+const FILES = list("--files");
+// ⚠️ 推送前把 CRLF 压成 LF。**必须用**：`core.autocrlf=true` 时 git 里存的是 LF、
+//    工作区是 CRLF，而本脚本读的是工作区字节 —— 不归一化就会把远端文件的行尾改掉
+//    （1.0.5 首发踩过：3 个 CRLF 文件被推成 CRLF，与仓库其余部分不一致）。
+const NORMALIZE_EOL = flag("--normalize-eol");
 const TOKEN = process.env.GITHUB_TOKEN;
 
 if (!TOKEN) {
@@ -97,27 +103,34 @@ async function api(method, path, body, { contentType = "application/json", raw =
 const gitBlobSha = (buf) => createHash("sha1").update(`blob ${buf.length}\0`).update(buf).digest("hex");
 
 // ---- 0. 待推送文件清单 ----
-if (!DIFF_BASE) {
-  console.error("必须给 --diff-base（本地基线提交），用它算出要推送哪些文件");
-  process.exit(2);
+let files;
+if (FILES.length) {
+  files = FILES;
+} else {
+  if (!DIFF_BASE) {
+    console.error("要给 --diff-base（本地基线提交，用它算变更文件），或用 --files 显式列文件");
+    process.exit(2);
+  }
+  files = execFileSync("git", ["diff", "--name-only", "--diff-filter=ACMR", DIFF_BASE, "HEAD"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  }).split("\n").map((s) => s.trim()).filter(Boolean);
 }
-let files = execFileSync("git", ["diff", "--name-only", "--diff-filter=ACMR", DIFF_BASE, "HEAD"], {
-  cwd: process.cwd(),
-  encoding: "utf8",
-}).split("\n").map((s) => s.trim()).filter(Boolean);
 
 if (!files.length) {
-  console.error(` ${DIFF_BASE}..HEAD 之间没有文件变更，无事可做`);
+  console.error(" 没有文件变更，无事可做");
   process.exit(2);
 }
 // vendor 的大文件也要推（渲染引擎随包分发）
 console.log(`\n===== 发布计划（${APPLY ? "APPLY" : "DRY-RUN"}）=====`);
 console.log(`仓库 ${REPO}  分支 ${BRANCH}  父提交 ${BASE_SHA.slice(0, 7)}`);
 console.log(`标签 ${TAG ?? "(跳过)"}  提交信息「${MESSAGE}」`);
+if (NORMALIZE_EOL) console.log(`行尾：推送前把 CRLF 压成 LF`);
 console.log(`\n待推送 ${files.length} 个文件：`);
 let totalBytes = 0;
 const payloads = files.map((path) => {
-  const buf = readFileSync(resolve(path));
+  const raw = readFileSync(resolve(path));
+  const buf = NORMALIZE_EOL ? Buffer.from(raw.toString("utf8").replace(/\r\n/g, "\n"), "utf8") : raw;
   totalBytes += buf.length;
   return { path: path.split("\\").join("/"), buf, sha: gitBlobSha(buf) };
 });
