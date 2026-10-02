@@ -277,6 +277,14 @@ node scripts/publish-via-api.mjs --tag vX.Y.Z `
 网络恢复后对齐用 `git fetch origin && git reset --hard origin/main`，**先确认两边的 tree 一致**
 （`git rev-parse HEAD^{tree}` 对远端 commit 的 tree）再 reset。
 
+**一个必踩的细节：行尾。** 这台机器 `core.autocrlf=true` —— git 里存的是 LF，checkout 到工作区是 CRLF。
+而 `publish-via-api.mjs` 读的是**工作区字节**，所以推之前必须加 `--normalize-eol`，否则会把远端文件的行尾改掉。
+1.0.5 首发就踩了：`src/injector.mjs` / `src/we-library.mjs` / `package.json` 三个本来在 git 里是 LF 的文件
+被推成 CRLF（仓库其余文件全是 LF），只能再用 `--files ... --normalize-eol` 推一次修回来。
+
+判据很直接：**`git rev-parse HEAD^{tree}` 与远端 commit 的 tree 不一致**，就用 Git Trees API
+（`/git/trees/<sha>?recursive=1`）把两边的 `path -> blob sha` 拉出来逐项比对，差异会精确到文件。
+
 **这次发版还有一条值得记住的实测结论**：`git worktree` 建对照基线很好用（`git worktree add <dir> <sha>`，
 零成本拿到一份"改动前"的代码去跑同一套测试），但在同一个渲染进程上跑测试时，**测试之间会通过
 localStorage 残留状态互相污染** —— 基线那次就因为继承了上一次的 `wePaused=true`，把三条本该失败的断言
