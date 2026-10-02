@@ -220,7 +220,6 @@ git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 pus
 ```
 
 **⚠️ 两个必踩的坑，都在 2026-09-29 实发过一次：**
-
 1. **Release 说明必须用 UTF-8 字节发送。** 直接把字符串丢给 `Invoke-RestMethod` 时它不按 UTF-8 编码，中文会整篇变成 `?????`（v1.0.3 第一版说明就这么废了，只能 PATCH 重发）。
 
    ```powershell
@@ -248,6 +247,40 @@ git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 pus
    上传记得走 `uploads.github.com`：`.../releases/$($rel.id)/assets?name=<文件名>`，`-ContentType application/zip`。
 
 Release 说明的写法参考：面向下载者，不写代码结构。参考同类项目的语气——`WJZ-P/sona`（写用户能感知的结果）、`BetterNCM-Installer`（极简）、`MomoTalkNTQQ-Theme`（口语化）。
+
+### 第三条路：git 不通时走 API（2026-10-03 发 1.0.5 实发验证）
+
+那天代理**全部**未监听（7897 / 7890 / 10809 / 10808 / 1080 / 8080 全试过），直连 `git fetch`/`git push`
+一律 `Empty reply from server` 或 `Recv failure: Connection was reset`（`-c http.version=HTTP/1.1` 也救不了）。
+但同一时刻 `api.github.com` 和 `uploads.github.com` **都通** —— 两条路走的中间设备不一样。
+
+于是用 GitHub 的 Git Data API 把提交推上去（blob → tree(base_tree) → commit → PATCH ref），再打标签、
+建 Release、传附件，一条命令走完。工具已经落在仓库里：
+
+```powershell
+$cred  = ("protocol=https`nhost=github.com`n" | git credential fill) 2>$null
+$env:GITHUB_TOKEN = ($cred | Select-String '^password=').Line -replace '^password=', ''
+# 默认 dry-run：只打印文件清单与父提交
+node scripts/publish-via-api.mjs --tag vX.Y.Z `
+  --diff-base <本地基线 sha> --base-sha <远端 main 头> `
+  --notes-file outputs/release-notes-X.Y.Z.md `
+  --assets dist/xxx-cn.zip dist/xxx-intl.zip
+# 确认无误再加 --apply；只补推文件、不动 tag/Release 就加 --skip-tag --skip-release
+```
+
+它的安全设计：**不做合并**（`--base-sha` 必须手填远端当前头）、分支更新用 `force:false`、
+推完逐文件核对 blob sha、附件核对字节数。**千万别用 `git push --force` 绕过去** —— 发 1.0.5 那次远端
+就躺着一个用户自己推的 README 重写（`c713513`），盲推会把它抹掉；正确做法是先把它的内容合进本地
+（下载远端文件 → 作为基线 → 重新施加本次改动），再拿它当 parent。
+
+⚠️ 走 API 之后**本地历史会与远端分叉**（本地多个提交 vs 远端一个合并提交，内容与 tree 相同）。
+网络恢复后对齐用 `git fetch origin && git reset --hard origin/main`，**先确认两边的 tree 一致**
+（`git rev-parse HEAD^{tree}` 对远端 commit 的 tree）再 reset。
+
+**这次发版还有一条值得记住的实测结论**：`git worktree` 建对照基线很好用（`git worktree add <dir> <sha>`，
+零成本拿到一份"改动前"的代码去跑同一套测试），但在同一个渲染进程上跑测试时，**测试之间会通过
+localStorage 残留状态互相污染** —— 基线那次就因为继承了上一次的 `wePaused=true`，把三条本该失败的断言
+"假通过"了。跑这类测试前先复位状态（`node scripts/probe-wwgl.mjs --port <n> --reset`）。
 
 ## 当前 Release 状态
 
