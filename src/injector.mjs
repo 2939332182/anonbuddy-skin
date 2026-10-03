@@ -68,7 +68,7 @@ async function themeEntry(loadedTheme) {
  * 就拿到脚本文本（用来 Page.addScriptToEvaluateOnNewDocument），那一刻它
  * 既不知道有几个 target、也没连上任何 target。
  */
-export async function buildInjectionPayload({ loadedTheme, themes, activeId, restoreLast = false, weItems = null, warmWeCache = false, deps = {} }) {
+export async function buildInjectionPayload({ loadedTheme, themes, activeId, restoreLast = false, weItems = null, warmWeCache = false, deps = {}, cdpPort = 0 }) {
   const menuThemes = themes?.length ? themes : [loadedTheme];
   const entries = [];
   for (const theme of menuThemes) entries.push(await themeEntry(theme));
@@ -195,6 +195,9 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
     reportBinding: REPORT_BINDING,
     version: product.version,
     repo: product.repo,
+    // 一键更新的本机端点：守护开在 CDP 端口 + 1000，面板靠这个常量找到它。
+    // 渲染进程读不了文件，除了"约定好的固定端口"没有别的会合点。
+    updatePort: Number.isInteger(cdpPort) && cdpPort > 0 ? cdpPort + 1000 : 0,
   });
   return {
     expression,
@@ -209,6 +212,7 @@ export async function applySkin({ loadedTheme, themes, port, activeId, restoreLa
   const Session = deps.Session ?? CdpSession;
   const payload = await buildInjectionPayload({
     loadedTheme, themes, activeId, restoreLast, weItems, warmWeCache, deps,
+    cdpPort: port,
   });
   const targets = await wait(port, {
     timeoutMs: deps.waitTimeoutMs ?? 20_000,

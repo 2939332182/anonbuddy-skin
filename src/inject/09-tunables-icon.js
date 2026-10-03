@@ -72,7 +72,10 @@
   //
   // ⚠️ 只给**顶层**玻璃面写。后代写了也白写：父级一旦有 backdrop-filter 就建立了新的
   //    backdrop root，后代的 backdrop-filter 只能模糊到父级内部（实测 blur(40px) 依然清晰穿透）。
-  const GLASS_SURFACES = [SIDEBAR_SEL, ".cr-input-container", ".wb-home-page__main-content"];
+  // ⚠️ 不要往这个列表里加 .wb-home-page__main-content：它覆盖右半屏，一旦挂上
+  //    backdrop-filter，整个视野的背部就糊成一片，壁纸失去细节（实测观感像"壁纸没加载"）。
+  //    玻璃只加在**有边界的卡片**上 —— 侧边栏、输入框、设置面板。
+  const GLASS_SURFACES = [SIDEBAR_SEL, ".cr-input-container"];
   // saturate 用 1.3、brightness 1.04、contrast 1.01 —— 这是 dsh-wallpaper-engine 实际写入的值
   // （不是它 CSS 里的兜底 1.8）。隔着玻璃看到的颜色比直接看更艳，这正是"液态"观感的来源。
   const GLASS_FILTER_TAIL = " saturate(1.3) brightness(1.04) contrast(1.01)";
@@ -128,6 +131,162 @@
     scheduleGlassVars();
   };
   reapplySidebarBlur = applyGlassBlur;
+
+  // ---- 跨窗口同步（2026-10-04，用户实测报的 bug）----
+  // 设置面板跑在**独立 renderer** 里（国内版和国际版都是，URL 带 windowAppId=settings），
+  // 而 CSS 自定义属性是**每个文档各写一份**的：在设置窗口拖滑块，改的只是那个窗口的
+  // html 变量，主窗口的侧边栏与输入框用的还是它自己那份旧值 —— 症状正是
+  // "这些选项只在设置里看得到变化，主界面左侧不动"。
+  // localStorage 是同 origin 共享的，所以用 storage 事件把它接回来：谁改了参数，
+  // 另一个窗口重新读一遍并应用（背景层的内联 filter、玻璃面的内联 backdrop-filter
+  // 都会跟着更新）。落盘发生在松手时，所以拖动过程中另一侧不跟手，抬手后立即一致 ——
+  // 与面板里"数字标签松手才更新"是同一条取舍。
+  window.addEventListener("storage", (event) => {
+    if (!event || event.key !== TUNABLES_KEY) return;
+    let next = null;
+    try { next = JSON.parse(event.newValue ?? "null"); } catch (error) { return; }
+    if (!next || typeof next !== "object") return;
+    for (const spec of TUNABLE_SPEC) tunables[spec.key] = clampTunable(spec, next[spec.key]);
+    applyTunables();
+  });
+
+  // ---- 自动调优：看当前壁纸一眼，把参数调到一组协调的值 ----
+  // 依据是 dsh-wallpaper-engine（MIT）的两条实测口径，只是反过来用：
+  //   · 它用 WCAG 相对亮度判定壁纸明暗，**阈值取 0.40 而不是中灰 0.2159** ——
+  //     因为它实测本机壁纸亮度的中位数正好是 0.214，中灰阈值切在分布最密处，
+  //     会把大量饱和的中间调判反。
+  //   · 它有一层"可读性地板"（浅色 0.45 / 深色 0.59）保证玻璃再透也读得清字。
+  // 我们据此反推：亮壁纸本来压不住文字，遮罩要给多、玻璃底要更实；
+  // 暗壁纸自己就压得住，遮罩可以给少，而高光与描边反而要加 ——
+  // 暗底上那两道白边才是"玻璃厚度"的来源，不给就成了一块脏玻璃。
+  // 只调这四项。模糊与壁纸模糊属于风格偏好，不该被自动改掉。
+  const SAMPLE_PX = 64;
+  const srgbToLinear = (channel) => {
+    const v = channel / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const relativeLuminance = (r, g, b) =>
+    0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+
+  // 取当前壁纸的代表帧。三条来源按可靠性排序 —— 关键是**设置窗口里没有 bgLayer**
+  // （子窗口不铺背景层），而"自动调优"按钮恰恰长在设置面板上，所以必须有回退：
+  //   ① 主窗口：直接问背景层的计算样式要（最准，WE 静态贴图与内置主题 hero 都在这里）
+  //   ② 任意窗口：从当前皮肤样式表的 url(...) 里抠出 hero（皮是同一套，图也是同一张）
+  //   ③ 再退一步：当前 WE 条目的预览图
+  // 三条都拿不到就返回 null，调用方据此提示"读不到壁纸"，绝不猜。
+  const wallpaperSourceUrl = () => {
+    if (bgLayer) {
+      let bgImage = "";
+      try { bgImage = getComputedStyle(bgLayer).backgroundImage || ""; } catch (error) { bgImage = ""; }
+      const urls = [];
+      const re = /url\((?:"|')?([^"')]+)(?:"|')?\)/g;
+      let hit = re.exec(bgImage);
+      while (hit) { urls.push(hit[1]); hit = re.exec(bgImage); }
+      const src = urls.length ? urls[urls.length - 1] : "";
+      // 1×1 透明 GIF 是"没有 hero"的占位，不能拿去采样
+      if (src && src.indexOf("data:image/gif") !== 0) return src;
+    }
+    const styleEl = document.getElementById(data.styleId);
+    if (styleEl && typeof styleEl.textContent === "string" && styleEl.textContent) {
+      const m = /url\((?:"|')?(data:image\/[^"')]+|file:[^"')]+)(?:"|')?\)/.exec(styleEl.textContent);
+      if (m && m[1].indexOf("data:image/gif") !== 0) return m[1];
+    }
+    if (weActiveId !== null) {
+      const item = weItems.find((candidate) => candidate.id === weActiveId);
+      if (item) return item.heroUrl || item.previewUrl || null;
+    }
+    return null;
+  };
+
+  const loadImage = (src) => new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    } catch (error) {
+      resolve(null);
+    }
+  });
+
+  // 画面占比最大色：缩到 64×64，按 4bit/通道（4096 桶）量化后取众数桶，返回桶中心。
+  // 用众数而不是平均色 —— 平均色会被大片纯背景稀释成"哪张壁纸都差不多"的灰，
+  // 而众数更接近人眼认的那个主色。同票取 key 小的，保证同一张图每次结论一致。
+  // 顺带把整幅的平均亮度算出来（判定明暗用）。
+  const analyzeWallpaper = async () => {
+    const src = wallpaperSourceUrl();
+    if (!src) return null;
+    const img = await loadImage(src);
+    if (!img || !img.width || !img.height) return null;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = SAMPLE_PX;
+      canvas.height = SAMPLE_PX;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0, SAMPLE_PX, SAMPLE_PX);
+      const data = ctx.getImageData(0, 0, SAMPLE_PX, SAMPLE_PX).data;
+      const buckets = new Map();
+      let lumSum = 0;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 128) continue;   // 透明区域不是画面
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        lumSum += relativeLuminance(r, g, b);
+        count += 1;
+        const key = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4);
+        buckets.set(key, (buckets.get(key) || 0) + 1);
+      }
+      if (!count) return null;
+      let topKey = -1;
+      let topCount = -1;
+      for (const entry of buckets) {
+        const key = entry[0];
+        const n = entry[1];
+        if (n > topCount || (n === topCount && (topKey < 0 || key < topKey))) { topKey = key; topCount = n; }
+      }
+      return {
+        lum: lumSum / count,
+        top: {
+          r: ((topKey >> 8) & 15) * 16 + 8,
+          g: ((topKey >> 4) & 15) * 16 + 8,
+          b: (topKey & 15) * 16 + 8,
+        },
+      };
+    } catch (error) {
+      // 跨源污染 / 解码失败 / getImageData 被拒 —— 一律当作"拿不到"，绝不抛给调用方
+      return null;
+    }
+  };
+
+  /**
+   * 按当前壁纸算一组参数并应用。
+   * @returns {Promise<{lum:number, applied:object}|null>} 拿不到画面时返回 null（调用方据此提示）
+   */
+  const autoTuneFromWallpaper = async () => {
+    const sample = await analyzeWallpaper();
+    if (!sample) return null;
+    const lum = Math.max(0, Math.min(1, sample.lum));
+    const pct = (n) => Math.max(0, Math.min(100, Math.round(n)));
+    const next = {
+      // 亮壁纸压不住字 → 遮罩给多；暗壁纸自己就压得住 → 给少
+      scrim: pct(8 + lum * 42),
+      // 玻璃底同理：亮底要更实，暗底可以更透
+      glassTint: pct(34 + lum * 22),
+      // 高光与描边反过来：暗底上那两道白边才看得出来
+      glassSheen: pct(30 + (1 - lum) * 40),
+      glassBorder: pct(20 + (1 - lum) * 34),
+    };
+    for (const spec of TUNABLE_SPEC) {
+      if (next[spec.key] === undefined) continue;
+      tunables[spec.key] = clampTunable(spec, next[spec.key]);
+    }
+    writeTunables();
+    applyTunables();
+    return { lum, applied: next };
+  };
 
   const ICON_HIDDEN_KEY = "anonbuddySkinIconHidden";
   const readIconHidden = () => {
@@ -286,6 +445,16 @@
     weScrimEl = document.createElement("div");
     weScrimEl.dataset.wbWeScrim = "1";
     bgLayer.appendChild(weScrimEl);
+  }
+
+  // 擦掉早期版本留在**原生元素**上的内联 backdrop-filter。
+  // 背景：重新注入只会重建我们自己创建的节点，原生元素上的内联样式会原地留着；
+  // 而 GLASS_SURFACES 已经不再包含这些选择器，于是没有谁去覆盖它 ——
+  // 结果是"改了代码却没效果"（实测：整片内容区一直被 blur(9.9px) 糊着，
+  // 看着像壁纸糊了，其实是上一版写下的残留）。
+  for (const staleSelector of [".wb-home-page__main-content"]) {
+    const stale = document.querySelector(staleSelector);
+    if (stale && stale.style.backdropFilter) stale.style.backdropFilter = "";
   }
 
   // 启动时应用哪个主题：

@@ -49,7 +49,58 @@
   // 面板行：和悬浮菜单的 row 同源（复用 row()），只是容器不同、点击后不关面板
   const paneRow = (label, dotColor, onPick, options = {}) => row(label, dotColor, onPick, options);
 
+  // ⚠️ 这两个工厂必须定义在 buildSettingsPane **之前**（模块级 const 有 TDZ）。
+  //    「自动调优」按钮长在外观调节那一组上，比壁纸那一组更早求值 —— 放在壁纸段里
+  //    会让整个 buildSettingsPane 抛 ReferenceError，症状是"面板根本建不出来"
+  //    （点入口没反应、pane 元素不存在），而不是某一块少了东西。
+  const mkWeBtn = (text, primary) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.style.cssText = "border-radius:8px;cursor:pointer;font:500 12px/1 system-ui;padding:7px 11px;" +
+      (primary
+        ? "border:1px solid var(--wb-pane-accent,#24c9d7);background:var(--wb-pane-accent,#24c9d7);color:#fff;"
+        : "border:1px solid var(--wb-pane-border,rgba(0,0,0,.14));background:transparent;color:inherit;");
+    return btn;
+  };
+  const mkWeHeadRow = (labelText) => {
+    const rowEl = document.createElement("div");
+    rowEl.style.cssText = "display:flex;align-items:center;gap:10px;";
+    const labelEl = document.createElement("span");
+    labelEl.textContent = labelText;
+    labelEl.style.cssText = "flex:none;font:400 12px/1.4 system-ui;opacity:.8;";
+    rowEl.appendChild(labelEl);
+    return rowEl;
+  };
+
+  // ---- 面板控件样式 ----
+  // 口径取自 dsh-wallpaper-engine（MIT）的控件设计：track 4px / thumb 16px 带 accent 边框 /
+  // 数值回显 48px 胶囊 / 只过渡非布局属性（background-color、transform 这类），
+  // 动画曲线用 cubic-bezier(.16,1,.3,1)。
+  // 做成一份样式表而不是每个元素各写一坨内联：内联写法在六个滑块上已经看得出重复，
+  // 而且没有 hover/active 伪类可用（内联给不了 ::-webkit-slider-thumb）。
+  // ⚠️ 整段在模板字符串之外（是数组 join），所以这里可以用双引号里的 CSS 原样书写。
+  const PANE_STYLE_ID = data.menuId + "-pane-style";
+  const ensurePaneStyle = () => {
+    if (document.getElementById(PANE_STYLE_ID)) return;
+    const styleEl = document.createElement("style");
+    styleEl.id = PANE_STYLE_ID;
+    styleEl.textContent = [
+      ".wb-p-slider{-webkit-appearance:none;appearance:none;width:100%;height:18px;margin:0;background:transparent;cursor:pointer;user-select:none;}",
+      ".wb-p-slider::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--wb-pane-track,rgba(0,0,0,.12));}",
+      ".wb-p-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border-radius:50%;background:var(--wb-pane-card,#fff);border:2px solid var(--wb-pane-accent,#24c9d7);box-shadow:0 1px 4px rgba(0,0,0,.3);transition:transform .12s cubic-bezier(.16,1,.3,1);}",
+      ".wb-p-slider:hover::-webkit-slider-thumb{transform:scale(1.12);}",
+      ".wb-p-slider:active::-webkit-slider-thumb{transform:scale(1.2);}",
+      ".wb-p-slider:focus-visible{outline:2px solid var(--wb-pane-accent,#24c9d7);outline-offset:2px;border-radius:4px;}",
+      ".wb-p-value{flex:none;min-width:48px;padding:2px 8px;border-radius:999px;font:500 12px/1.4 ui-monospace,monospace;text-align:center;opacity:.9;background:var(--wb-pane-active,rgba(0,0,0,.06));}",
+      ".wb-p-row{display:flex;align-items:center;gap:10px;min-height:32px;}",
+      "@media (prefers-reduced-motion: reduce){.wb-p-slider::-webkit-slider-thumb{transition:none;}}",
+    ].join("");
+    document.head.appendChild(styleEl);
+  };
+
   const buildSettingsPane = () => {
+    ensurePaneStyle();
     const pane = document.createElement("div");
     pane.id = pluginPaneId;
     pane.dataset.wbPluginPane = "1";
@@ -220,10 +271,19 @@
     // 2026-10-04 从"两个滑块"扩成一套外观系统。分组是必要的：六项平铺的话，
     // 用户分不清"壁纸模糊"和"玻璃模糊"分别动的是谁。
     const tuneGroup = document.createElement("div");
+    // 标题行：左边分组名，右边「自动调优」。
+    // 按钮放标题行而不是卡片里 —— 它是这一整组的总动作，跟逐项滑块不是一个层级。
+    const tuneHead = document.createElement("div");
+    tuneHead.style.cssText = "display:flex;align-items:center;gap:10px;margin:0 0 8px;";
     const tuneLabel = document.createElement("p");
     tuneLabel.textContent = "外观调节";
-    tuneLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
-    tuneGroup.appendChild(tuneLabel);
+    tuneLabel.style.cssText = "margin:0;flex:1;min-width:0;font:500 13px/1.4 system-ui;opacity:.6;";
+    const autoBtn = mkWeBtn("自动调优", false);
+    autoBtn.dataset.wbAutoTune = "1";
+    autoBtn.style.cssText += "flex:none;padding:6px 10px;";
+    autoBtn.title = "看当前壁纸一眼，把遮罩 / 通透 / 高光 / 描边调成一组协调的值";
+    tuneHead.append(tuneLabel, autoBtn);
+    tuneGroup.appendChild(tuneHead);
     const tuneSyncers = [];
     const mkSlider = (spec) => {
       const rowEl = document.createElement("div");
@@ -234,7 +294,7 @@
       name.textContent = spec.label;
       name.style.cssText = "flex:1;min-width:0;";
       const value = document.createElement("span");
-      value.style.cssText = "flex:none;font:500 12px/1 ui-monospace,monospace;opacity:.75;min-width:28px;text-align:right;";
+      value.className = "wb-p-value";
       head.append(name, value);
 
       const input = document.createElement("input");
@@ -243,8 +303,9 @@
       input.max = "100";
       input.step = "1";
       input.dataset.wbTunable = spec.key;
-      // 根节点是 user-select:none，滑块必须显式开回交互（与重命名输入框同理）
-      input.style.cssText = "width:100%;margin:0;accent-color:var(--wb-pane-accent,#24c9d7);cursor:pointer;user-select:none;";
+      // 样式走 .wb-p-slider（见 ensurePaneStyle）：内联给不了 :hover 与 ::-webkit-slider-thumb，
+      // 而"thumb 带 accent 描边 + hover 放大"正是这套控件的观感来源。
+      input.className = "wb-p-slider";
       input.setAttribute("aria-label", spec.label);
 
       const sync = () => {
@@ -304,6 +365,35 @@
       tuneSyncers.forEach((fn) => fn());
     };
 
+    // 自动调优：按当前壁纸算一组参数并落盘。
+    // 拿不到画面时（跨源污染 / 壁纸还没加载 / 三条来源都空）**必须说出来** ——
+    // 点一下什么都没发生，比报一句话更让人困惑。
+    autoBtn.addEventListener("click", () => {
+      if (autoBtn.disabled) return;
+      autoBtn.disabled = true;
+      autoBtn.style.opacity = ".6";
+      autoBtn.textContent = "分析中…";
+      let note = "已按壁纸调好";
+      Promise.resolve()
+        .then(() => autoTuneFromWallpaper())
+        .then((result) => {
+          if (!result) {
+            note = "读不到壁纸";
+          } else {
+            // 面板上的滑块要跟着回显新值（自动调优是绕过 UI 直接改 tunables 的）
+            pane.__syncTunables();
+            note = "已按壁纸调好";
+          }
+        })
+        .catch(() => { note = "调优失败"; })
+        .then(() => {
+          autoBtn.disabled = false;
+          autoBtn.style.opacity = "";
+          autoBtn.textContent = note;
+          setTimeout(() => { autoBtn.textContent = "自动调优"; }, 1800);
+        });
+    });
+
     // ---- 分组 5：Wallpaper Engine 壁纸（本机）----
     // 面板结构对齐 dsh 皮肤中心的壁纸库：声音/音量 -> 手动目录 -> 评级筛选 -> 分页 -> 卡片。
     const weGroup = document.createElement("div");
@@ -321,25 +411,6 @@
     weNote.style.cssText = "padding:9px 12px;font:500 11px/1.5 system-ui;color:#c2761a;" +
       "background:color-mix(in srgb, #f0a63a 14%, transparent);border-bottom:1px solid var(--wb-pane-border,rgba(0,0,0,.06));";
 
-    const mkWeBtn = (text, primary) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = text;
-      btn.style.cssText = "border-radius:8px;cursor:pointer;font:500 12px/1 system-ui;padding:7px 11px;" +
-        (primary
-          ? "border:1px solid var(--wb-pane-accent,#24c9d7);background:var(--wb-pane-accent,#24c9d7);color:#fff;"
-          : "border:1px solid var(--wb-pane-border,rgba(0,0,0,.14));background:transparent;color:inherit;");
-      return btn;
-    };
-    const mkWeHeadRow = (labelText) => {
-      const rowEl = document.createElement("div");
-      rowEl.style.cssText = "display:flex;align-items:center;gap:10px;";
-      const labelEl = document.createElement("span");
-      labelEl.textContent = labelText;
-      labelEl.style.cssText = "flex:none;font:400 12px/1.4 system-ui;opacity:.8;";
-      rowEl.appendChild(labelEl);
-      return rowEl;
-    };
 
     // ---------- 声音 / 音量（对齐 dsh 的 skin-wallpaper.sound / volume）----------
     const weHead = document.createElement("div");
@@ -745,9 +816,10 @@
       updateDesc.textContent = "检查 GitHub 上有没有更新的版本。";
       updateDesc.style.cssText = "font-size:12px;opacity:.55;margin-top:2px;";
       updateCopy.append(updateTitle, updateDesc);
-      const checkBtn = mkWeBtn("检查更新", false);
+      const checkBtn = mkWeBtn(data.updatePort ? "一键更新" : "检查更新", false);
       checkBtn.dataset.wbCheckUpdate = "1";
       checkBtn.style.cssText += "flex:none;padding:7px 12px;";
+      if (data.updatePort) checkBtn.title = "直接下载并安装最新版，全程不用离开这里";
       updateRow.append(updateCopy, checkBtn);
 
       // 恢复描述行的默认文案与配色（检查结束后调用）
@@ -838,14 +910,74 @@
         checkResetTimer = setTimeout(resetCheckButton, 12000);
       };
 
+      // 一键更新：下载与安装都交给守护进程（渲染进程是 file:// 页面，写不了文件系统），
+      // 这里只负责发请求与显示结论。连不上 GitHub 时守护会自己换镜像源，那段过程在它的
+      // 日志里；面板只需要等一个最终结果 —— 所以这里不做进度条，避免显示一个假的百分比。
+      // ⚠️ 必须定义在 checkForUpdate 之前：同作用域 const 有 TDZ，反过来写会让整个
+      //    buildSettingsPane 抛错（刚踩过这个坑，症状是"面板根本建不出来"）。
+      const runOneClickUpdate = () => {
+        checkBtn.disabled = true;
+        checkBtn.style.opacity = ".6";
+        checkBtn.textContent = "更新中…";
+        updateDesc.textContent = "正在下载并安装。慢的话会自动换镜像源，请稍候。";
+        updateDesc.style.opacity = ".75";
+        fetch("http://127.0.0.1:" + data.updatePort + "/update", { method: "POST" })
+          .then((res) => res.json())
+          .then((result) => {
+            if (result && result.ok && result.applied) {
+              checkBtn.textContent = "\u2713 已更新";
+              checkBtn.style.background = "rgba(63,158,90,.14)";
+              checkBtn.style.borderColor = "rgba(63,158,90,.55)";
+              checkBtn.style.color = "#3f9e5a";
+              updateDesc.textContent = "已更新到 v" + result.to + "（原 v" + (result.from || "?") + "），重启 WorkBuddy 后生效。";
+              updateDesc.style.opacity = ".85";
+              try {
+                checkBtn.animate(
+                  [
+                    { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(63,158,90,.5)" },
+                    { transform: "scale(1.12)", boxShadow: "0 0 0 9px rgba(63,158,90,0)", offset: 0.55 },
+                    { transform: "scale(1)" },
+                  ],
+                  { duration: 720, easing: "cubic-bezier(.34,1.56,.64,1)" },
+                );
+              } catch (error) {}
+              return;   // 成功后不再把按钮复位 —— 让"已更新"留在眼前
+            }
+            if (result && result.ok && result.stage === "uptodate") {
+              celebrateLatest();
+              return;
+            }
+            checkBtn.textContent = "更新失败";
+            updateDesc.textContent = ((result && result.error) || "未知原因") + " —— 稍后再试，或点上面的项目地址手动下载。";
+            updateDesc.style.opacity = ".8";
+          })
+          .catch((error) => {
+            // 端点连不上：多半是守护没在跑（它是更新唯一能落地的地方）
+            checkBtn.textContent = "连不上更新服务";
+            updateDesc.textContent = "守护进程没在跑。用启动器（一键换肤.vbs）重开一次再试。";
+            updateDesc.style.opacity = ".8";
+          })
+          .then(() => {
+            checkBtn.disabled = false;
+            checkBtn.style.opacity = "";
+            if (checkBtn.textContent === "更新中…") checkBtn.textContent = "一键更新";
+          });
+      };
+
       const checkForUpdate = () => {
         // 已经在"有新版本"状态时，按钮的职责变成打开下载页
         if (pendingPage) {
           try { window.open(pendingPage, "_blank"); } catch (error) {}
           return;
         }
+        // ① 有本机端点 → 真正的一键更新（下载 + 安装都在守护里完成，不用离开这个面板）
+        if (data.updatePort) {
+          runOneClickUpdate();
+          return;
+        }
+        // ② 没有端点（例如只跑过一次 cli apply、守护没起来）→ 退回"查一下、给你下载页"
         if (!data.repo) {
-          updateDesc.textContent = "这个包没有带仓库地址，无法检查更新。";
+          updateDesc.textContent = "这个包没有带仓库地址，也连不上更新服务。";
           updateDesc.style.opacity = ".7";
           return;
         }
@@ -965,6 +1097,9 @@
     setVar("--wb-pane-active", dark ? "rgba(255,255,255,.10)" : "rgba(36,201,215,.12)");
     // 悬停底色：深色面板上不能再用 rgba(0,0,0,...) 那套（黑压黑等于没有反馈）
     setVar("--wb-pane-hover", dark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.04)");
+    // 滑块的 track 底色（.wb-p-slider 用）。深色面板上 rgba(0,0,0,.12) 等于没有，
+    // 必须换成白色系才看得见。
+    setVar("--wb-pane-track", dark ? "rgba(255,255,255,.18)" : "rgba(0,0,0,.12)");
     setVar("--wb-pane-surface", surface);
     // 卡片底色由变量给，这里兜一个显式值，避免变量在极端情况下没生效就变透明
     const wantColor = dark ? "#f0f2f6" : "#1a1a1a";

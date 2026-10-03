@@ -71,7 +71,7 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
-export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, wwglUrl = null, activeHint = null, reportBinding = null, version = null, repo = null }) {
+export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, wwglUrl = null, activeHint = null, reportBinding = null, version = null, repo = null, updatePort = 0 }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
   }
@@ -144,6 +144,9 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     //    api.github.com 的 URL 里，宽松放行等于让 payload 决定请求打到哪儿。
     version: typeof version === "string" && version ? version : null,
     repo: typeof repo === "string" && /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+$/i.test(repo) ? repo : null,
+    // 一键更新的本机端点端口（守护开在 CDP 端口 + 1000）。0 = 没接上，面板就不显示按钮 ——
+    // 渲染进程读不了文件，除了这个约定好的固定端口没有别的会合点。
+    updatePort: Number.isInteger(updatePort) && updatePort > 0 ? updatePort : 0,
   });
 
   // 头尾保持一字不差：正文分片是从原模板求值后的产物逐字节切出来的，拼接结果与拆分前完全等价。
