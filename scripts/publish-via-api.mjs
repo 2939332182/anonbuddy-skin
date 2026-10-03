@@ -141,11 +141,23 @@ console.log(`标签 ${TAG ?? "(跳过)"}  提交信息「${MESSAGE}」`);
 if (NORMALIZE_EOL) console.log(`行尾：推送前把 CRLF 压成 LF`);
 console.log(`\n待推送 ${files.length} 个文件：`);
 let totalBytes = 0;
+/**
+ * 看着像二进制就别碰它的字节。
+ *
+ * 行尾归一化（--normalize-eol）是对**文本**做的，而它是全局开关 —— 对 GIF / PNG / ZIP
+ * 走一遍 `toString("utf8").replace(/\r\n/g,"\n")` 再编码回去，会把文件彻底毁掉：
+ * 非法字节变成 U+FFFD、编码后体积还会膨胀。实测把一个 1,411,132 字节的 GIF
+ * 推成了 2,465,231 字节的乱码，GitHub 上那张图就再也显示不出来。
+ */
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|avif|ico|bmp|zip|7z|gz|tgz|exe|dll|so|dylib|pkg|mp4|webm|mov|mp3|ogg|woff2?|ttf|otf|eot|asar|node|wasm)$/i;
+const isBinaryPath = (p) => BINARY_EXT.test(p);
+
 const payloads = files.map((path) => {
   const raw = readFileSync(resolve(path));
-  const buf = NORMALIZE_EOL ? Buffer.from(raw.toString("utf8").replace(/\r\n/g, "\n"), "utf8") : raw;
+  const normalize = NORMALIZE_EOL && !isBinaryPath(path);
+  const buf = normalize ? Buffer.from(raw.toString("utf8").replace(/\r\n/g, "\n"), "utf8") : raw;
   totalBytes += buf.length;
-  return { path: path.split("\\").join("/"), buf, sha: gitBlobSha(buf) };
+  return { path: path.split("\\").join("/"), buf, sha: gitBlobSha(buf), normalized: normalize };
 });
 for (const f of payloads.slice(0, 20)) console.log(`  ${String(f.buf.length).padStart(9)}  ${f.path}`);
 if (payloads.length > 20) console.log(`  ... 其余 ${payloads.length - 20} 个`);
