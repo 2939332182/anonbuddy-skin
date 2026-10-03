@@ -131,6 +131,19 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 - **设置面板底部加「插件更新」**：查 GitHub 最新 Release（404 时退回 tags）、三段式版本比较、
   已是最新版时按钮走一次回弹动画并转绿，另附可点击的项目地址。
   分组名刻意叫「插件更新」而不是「关于」—— 左侧原生导航**已经有一个「关于」**，重名会混淆。
+- **一键更新**（同日补做，把上一行那个按钮从"给下载页"升级成"直接装完"）：守护开一个
+  只绑回环的端点 `127.0.0.1:<CDP端口+1000>`，面板点按钮打过去 —— 渲染进程是 file:// 页面，
+  **写不了文件系统**，下载与安装只能由 Node 侧做。新增 `src/zip-read.mjs`（零依赖 ZIP 读取器，
+  仓库原本只有写入器）与 `src/self-update.mjs`（查版本 → 多镜像下载 → 校验字节数与 ZIP 魔数 →
+  解包 → 拒绝绝对路径与 `..` 穿越 → 覆盖安装）。端口用固定偏移而不是随机端口：渲染进程读不了
+  文件，除了"约定好的端口"没有别的会合点。
+  镜像按本机实测排序：**直连 / ghproxy.net / gh-proxy.com / ghfast.top** 可用；
+  hub.gitmirror.com、gh.llkk.cc、github.moeyy.xyz 实测域名失效或超时，没有放进去。
+- **外观四处修复 + 面板控件重做**：见坑章节新增的四条；控件按 dsh-wallpaper-engine 的口径
+  统一（4px track + 16px thumb 带 accent 描边、hover 放大 + 48px 数值胶囊 + 深色 track）。
+- **README 重写**：把「场景壁纸本机实时渲染」提到第一句作为主卖点，补「同类工具通常怎么做」
+  对比表与「外观」章节；顺手修掉一份引用了**不存在**的 `docs/images/preview-scene.gif` 的破图
+  （两份 README 都引了它，没人发现）。
 
 **2026-10-03（v1.0.5）**
 
@@ -239,6 +252,48 @@ localStorage 一起被改成 0 —— 症状是"暂停一下再继续，声音�
 `effectiveVolume() = 静音开关开着且未暂停 ? weVolume : 0`，`weVolume` 永远保留用户那一次设定。
 同一个坑的另一半：`setWeSound` 必须同时调 `syncWwglVolume()` —— scene 壁纸没有 `<video>`，
 它的声音只走 WebGL 实例的 `setVolume`，漏掉这一行的症状是"打开声音开关，scene 壁纸照样无声"。
+
+**CSS 自定义属性必须在声明它的元素上就能解析出 `var()`（2026-10-04）。**
+`--wb-glass-base: color-mix(in srgb, var(--wb-surface) 84%, #ffffff)` 写在 `:root` 上，而
+`--wb-surface` 定义在 `body` 上 —— 于是它在 `:root` 上解析失败，变成 guaranteed-invalid
+**并且停止向下继承**，body 上读出来是空的，使用处整条 `background-color` 被丢弃。
+症状极具迷惑性：玻璃"看起来没有"（三个面的背景全是 `rgba(0,0,0,0)`），可变量名在开发者工具里
+明明写着。参考项目的反面清单里记着同型的坑（同一元素上 `var(--x)` 解析成 guaranteed-invalid
+⇒ 块内改读另一个来源），它那条结论可以直接照抄：**回退必须是"写另一个值"，不能是"不写"。**
+
+**"没有人再写它"不等于它就消失了（2026-10-04）。**
+早期版本给 `.wb-home-page__main-content` 写过**内联** `backdrop-filter`。后来把它从
+`GLASS_SURFACES` 里移除后，没有谁去覆盖那行内联值 —— 重新注入只重建我们自己创建的节点，
+**原生元素上的内联样式原地留着**。症状：整片内容区一直被 `blur(9.9px)` 糊着，看着像"壁纸糊了"，
+其实是上一版的残留。**凡是"从选择器列表里删掉"的元素，都要顺手擦一次内联样式。**
+
+**独立窗口各写各的 CSS 变量（2026-10-04）。**
+设置面板跑在独立 renderer 里（两个版本都是），而 CSS 自定义属性是**每个文档各写一份**的 ——
+在设置窗口拖滑块只改那个窗口的 html 变量，主窗口的侧边栏用的是它自己那份，纹丝不动。
+用户的原话是"很多选项只作用在模块设置中，主界面左侧没有变化"。
+`localStorage` 跨窗口共享，CSS 变量不共享；中间要自己架桥（这里用 `storage` 事件）。
+
+**同作用域 `const` 的 TDZ 会让整个函数抛错（2026-10-04）。**
+`mkWeBtn` / `mkWeHeadRow` 原本定义在壁纸那一段（比外观调节更晚），而新加的「自动调优」按钮
+长在更早的外观调节组上 ⇒ `Cannot access 'mkWeBtn' before initialization` ⇒
+`buildSettingsPane` 整个抛错。症状是**面板根本建不出来**（点入口没反应、pane 元素不存在），
+不是"少了某一块"。两个工厂已上移到 `buildSettingsPane` 之前。
+
+**窗口不可见时截图会挂住，而不是报错（2026-10-04）。**
+`Page.captureScreenshot` 要等合成器出新帧；窗口收进托盘 / 最小化时没有新帧，
+请求就一直悬着直到超时（PNG、JPEG、`optimizeForSpeed` 都一样）。
+判据别只看进程有没有窗口句柄 —— 句柄可能还在而页面已经 `document.hidden === true`，
+**要问页面自己**。恢复用 `ShowWindowAsync(hWnd, 9)`，句柄现查。
+另外 `Page.captureScreenshot` 的 `clip.scale` 会让 Chromium 重新光栅化，在场景渲染占着 GPU 时
+直接把截图卡死（实测 60s 超时），而且**那个覆盖没被回收**，后续视口一直停在缩放后的尺寸。
+要缩图就在本地缩，别用 clip。
+
+**这台机器上没有 ffmpeg / ImageMagick / gifsicle（2026-10-04）。**
+要出 README 的场景演示 GIF，最后是自己写的一整条链：CDP 连续取帧 → 自己解 PNG（8bit 非隔行，
+五种反过滤都实现了）→ 中位切分量化到 256 色 → GIF89a + LZW 编码。
+脚本在 `outputs/make-preview-gif.mjs`（gitignored，不算 `scripts/` 的注册表）。
+**它值得长期留用**：以后要再出演示图，把它移进 `scripts/` 并同步更新 `test-scripts-registry.mjs`
+的脚本计数即可。
 
 ## 已知限制与待办
 
