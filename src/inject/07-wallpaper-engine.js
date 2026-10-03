@@ -63,6 +63,13 @@
     } catch (error) { return 35; }
   })();
 
+  // 实际该送进媒体的音量。**必须是派生的，不能把"暂停"写成 volume = 0**：
+  // 那样会连用户设的值一起抹掉，恢复播放后声音再也回不来，而且那个 0 还会被写进
+  // localStorage —— 重启之后依然是静音。实测症状正是"暂停一下再继续，声音就没了，
+  // 得重新拖一次音量"。
+  // 现在 weVolume 永远保留用户那一次设定，暂停 / 静音开关只影响这个派生值。
+  const effectiveVolume = () => (weSound && !wePaused ? Math.min(1, Math.max(0, weVolume / 100)) : 0);
+
   const applyVolume = () => {
     // 用 DOM 兜底，不只认 bgVideo 这个引用：
     // 切换主题/重建视频的时序里，bgVideo 可能已经和图层里的真实元素脱钩
@@ -72,9 +79,10 @@
       ? bgVideo
       : document.querySelector("#" + BG_LAYER_ID + " > video");
     if (!el) return;
+    const volume = effectiveVolume();
     try {
-      el.volume = Math.min(1, Math.max(0, weVolume / 100));
-      el.muted = !weSound;
+      el.volume = volume;
+      el.muted = volume <= 0;
     } catch (error) {}
   };
 
@@ -82,18 +90,20 @@
     weSound = Boolean(value);
     writeFlag(WE_SOUND_KEY, weSound);
     applyVolume();
+    // ⚠️ 这行不能少：scene 壁纸没有 <video>，它的声音只走 WebWallGL 实例的 setVolume。
+    //    漏掉它就会出现"打开了声音开关，scene 壁纸照样一点声都没有"。
+    syncWwglVolume();
     syncWeUi();
   };
 
-  // 音量与播放状态是联动的：
-  //   拖音量（>0）= 用户想听声音 → 自动解除静音，并让暂停中的壁纸恢复播放；
-  //   暂停播放   = setWePaused 会把音量归零（见下），所以两个动作不会打架。
-  // options.fromPause 区分"因暂停而被动归零"这一路，避免它反过来把自己唤醒。
-  const setWeVolume = (value, options = {}) => {
+  // 拖音量 = 用户想听声音 → 顺手解除静音；壁纸若正停着，也一并恢复播放。
+  // （暂停已不再归零音量，所以"音量不为 0 就恢复播放"这条规则反而更直白：
+  //   weVolume 现在表示用户真正想要的那个值，不会被暂停改写成 0。）
+  const setWeVolume = (value) => {
     const next = Math.round(Number(value));
     weVolume = Number.isFinite(next) ? Math.min(100, Math.max(0, next)) : weVolume;
     try { localStorage.setItem(WE_VOLUME_KEY, String(weVolume)); } catch (error) {}
-    if (!options.fromPause && weVolume > 0) {
+    if (weVolume > 0) {
       if (!weSound) { weSound = true; writeFlag(WE_SOUND_KEY, weSound); }
       if (wePaused) { wePaused = false; writeWePaused(false); }
     }
@@ -206,7 +216,7 @@
   const syncWwglVolume = () => {
     if (!wwglInstance) return;
     try {
-      wwglInstance.setVolume(weSound ? Math.min(1, Math.max(0, weVolume / 100)) : 0);
+      wwglInstance.setVolume(effectiveVolume());
     } catch (error) {}
   };
 
@@ -239,7 +249,7 @@
       const mounting = lib.mount(holder, {
         source: lib.bytesSource(bytes, null, "anonbuddy-we-" + myId),
         fps: 30,   // 场景多是慢速动效，30fps 观感损失很小，GPU 直接省一半
-        volume: weSound ? Math.min(1, Math.max(0, weVolume / 100)) : 0,
+        volume: effectiveVolume(),
         autoplay: !wePaused,
       });
       let wp = null;
@@ -298,9 +308,9 @@
       video.src = item.fileUrl;
       video.loop = true;
       video.autoplay = true;
-      video.muted = !weSound;
-      video.volume = Math.min(1, Math.max(0, weVolume / 100));
-      video.defaultMuted = !weSound;
+      video.muted = effectiveVolume() <= 0;
+      video.volume = effectiveVolume();
+      video.defaultMuted = effectiveVolume() <= 0;
       video.playsInline = true;
       video.setAttribute("playsinline", "");
       video.preload = "auto";
@@ -331,11 +341,14 @@
   const setWePaused = (paused) => {
     wePaused = Boolean(paused);
     writeWePaused(wePaused);
-    // 暂停就把音量归零：既避免"暂停了还在出声"，也让"拖音量"成为恢复播放的
-    // 唯一入口（音量不为 0 就自动播放，见 setWeVolume）。
-    if (wePaused && weVolume !== 0) setWeVolume(0, { fromPause: true });
+    // 暂停即静音，但**不销毁**用户设的音量：真正的输出音量由 effectiveVolume()
+    // 派生（暂停、静音开关都会让它变 0），weVolume 始终保留用户那一次设定。
+    // 旧写法在这里调 setWeVolume(0)，于是"暂停 → 继续"之后声音永久消失，
+    // 且 0 被落盘 —— 重启也还是没声。
+    applyVolume();
     syncBgVideoPlayback();
     syncWwglPlayback();
+    syncWwglVolume();
     syncWeButtons();
   };
 

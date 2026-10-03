@@ -4,7 +4,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CdpSession, fetchRendererTargets, waitForRendererTargets } from "./cdp-client.mjs";
-import { REPORT_BINDING } from "./constants.mjs";
+import { REPORT_BINDING, readProductInfo } from "./constants.mjs";
 import { readActiveId } from "./active-state.mjs";
 import { buildSkinCss } from "./skin-css.mjs";
 import { buildSkinMenuScript, CSS_SENTINELS } from "./skin-menu.mjs";
@@ -170,6 +170,10 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
     /* 状态文档读不了不影响换肤，渲染进程照旧用 localStorage */
   }
 
+  // 版本号与仓库地址：设置面板底部的「关于」用它们做检查更新与项目链接。
+  // 读 package.json 拿，见 constants.mjs —— 版本号只有一处真源。
+  const product = readProductInfo();
+
   const expression = buildSkinMenuScript({
     entries,
     activeId: themeId,
@@ -189,6 +193,8 @@ export async function buildInjectionPayload({ loadedTheme, themes, activeId, res
     // 外部状态文档里的当前皮肤 + 守护挂的上报通道名（见 active-state.mjs / skin-guard.mjs）
     activeHint,
     reportBinding: REPORT_BINDING,
+    version: product.version,
+    repo: product.repo,
   });
   return {
     expression,

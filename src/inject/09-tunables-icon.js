@@ -5,25 +5,44 @@
   const POS_KEY = "anonbuddySkinMenuPos";
   // 悬浮图标显隐开关：设置面板里的「显示悬浮小图标」控制；关掉后按钮隐藏，
   // 但菜单本身与皮肤照常工作（入口改从设置面板进）。
-  // ---- 两个外观调节项：侧边栏毛玻璃 / 背景图模糊（2026-09-20）----
-  // 只改 html 上的 CSS 变量（内联样式），**不重建 <style>** —— 避免整张样式表重解析与重排。
-  // 滑块对外是 1..100 的整数，换算成 px 的系数写在这里；CSS 侧只认 *-px 变量。
-  // 默认值刻意与"没这功能之前"的观感一致：侧边栏 100（= 原来的 24px）、背景 1（≈0.3px，肉眼无感）。
+  // ---- 外观调节项（2026-10-04 从"两个滑块"扩成一套外观系统）----
+  // 原来只有「侧边栏毛玻璃 / 背景图模糊」，覆盖不到真正决定观感的东西：
+  // 壁纸压多暗、玻璃透不透、边缘有没有厚度。现在按两组给六个：
+  //   壁纸组     —— 壁纸模糊、磨砂遮罩
+  //   液态玻璃组 —— 玻璃模糊、玻璃通透、顶部高光、边缘描边
+  // 配方与取值区间照 dsh-wallpaper-engine（MIT）的实测口径，见 skin.css 顶部注释。
+  //
+  // 每个键：0..100 的滑块值 × factor = CSS 变量的最终取值（换算区间写在行尾注释里）。
+  // 默认值不是随手取的：玻璃 0.3×55≈16px、遮罩 0.01×25=0.25、通透 62% 都对齐参考实现的默认观感。
+  // legacyKey 是给老用户留的迁移通道：sidebarBlur 这个键在新版里泛化成了 glassBlur
+  // （从"只作用于侧边栏"扩到所有玻璃面），读到旧值时按同一个含义搬过来，不让用户的调节白调。
   const TUNABLES_KEY = "anonbuddySkinTunables";
   const TUNABLE_SPEC = [
-    { key: "sidebarBlur", label: "侧边栏毛玻璃", varName: "--wb-sidebar-blur-px", factor: 0.24, def: 100 },
-    { key: "bgBlur", label: "背景图模糊", varName: "--wb-bg-blur-px", factor: 0.3, def: 1 },
+    { key: "bgBlur", group: "壁纸", label: "壁纸模糊", def: 1, varName: "--wb-bg-blur-px", factor: 0.3 },     // 0..30px
+    { key: "scrim", group: "壁纸", label: "磨砂遮罩", def: 25, varName: "--wb-scrim-alpha", factor: 0.01 },    // 0..1
+    { key: "glassBlur", group: "液态玻璃", label: "玻璃模糊", def: 55, varName: "--wb-glass-blur-px", factor: 0.3, legacyKey: "sidebarBlur" }, // 0..30px
+    { key: "glassTint", group: "液态玻璃", label: "玻璃通透", def: 62, varName: "--wb-glass-tint", factor: 1 },        // 0..100%
+    { key: "glassSheen", group: "液态玻璃", label: "顶部高光", def: 50, varName: "--wb-glass-sheen", factor: 0.0064 },  // 0..0.64
+    { key: "glassBorder", group: "液态玻璃", label: "边缘描边", def: 25, varName: "--wb-glass-border", factor: 0.0032 }, // 0..0.32
   ];
+  // 滑块对外统一 0..100（0 是"关掉这一项"，有意义：遮罩 0 = 不压暗、高光 0 = 平板玻璃）
   const clampTunable = (spec, value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return spec.def;
-    return Math.max(1, Math.min(100, Math.round(n)));
+    const lo = typeof spec.min === "number" ? spec.min : 0;
+    const hi = typeof spec.max === "number" ? spec.max : 100;
+    return Math.max(lo, Math.min(hi, Math.round(n)));
   };
   const readTunables = () => {
     let stored = null;
     try { stored = JSON.parse(localStorage.getItem(TUNABLES_KEY) ?? "null"); } catch {}
     const out = {};
-    for (const spec of TUNABLE_SPEC) out[spec.key] = clampTunable(spec, stored?.[spec.key] ?? spec.def);
+    for (const spec of TUNABLE_SPEC) {
+      let raw = stored ? stored[spec.key] : undefined;
+      // 旧键迁移：sidebarBlur → glassBlur
+      if (raw === undefined && spec.legacyKey && stored) raw = stored[spec.legacyKey];
+      out[spec.key] = clampTunable(spec, raw ?? spec.def);
+    }
     return out;
   };
   const tunables = readTunables();
@@ -34,6 +53,8 @@
   // 背景媒体层的节点引用。真实节点在下方创建（那时才能 append 到 body），
   // 这里先声明 —— applyTunables 在初始化阶段就会被调用，直接引用 const 会撞 TDZ。
   let bgLayer = null;
+  // 磨砂遮罩层：bgLayer 的子元素，同样先声明后创建（理由同上）。
+  let weScrimEl = null;
   // 侧边栏模糊的补涂钩子（React 重建侧边栏会丢掉内联值，由护栏轮询顺手补回）。
   // 同样是前置声明，实现在 applySidebarBlur 之后赋值。
   let reapplySidebarBlur = () => {};
@@ -42,20 +63,51 @@
   const BG_LAYER_ID = "anonbuddy-skin-bg";
   const SIDEBAR_SEL = "[data-view-id=sidebar]";
 
-  // ⚠️ 侧边栏的模糊**直接写 backdrop-filter 内联样式**，不要走自定义属性。
+  // ---- 玻璃面：直接写 backdrop-filter 内联样式，不走自定义属性 ----
   // 实测（本机 2269 个元素）：
   //   · 在 html 上 style.setProperty 写自定义属性 → 全文档重算，23ms/次（拖动只有 ~40fps）
-  //   · 在侧边栏元素上写自定义属性 → 只重算它自己那 408 个后代，3.2ms/次
+  //   · 在元素上写自定义属性 → 只重算它自己那棵子树，3.2ms/次
   //   · 直接写 backdrop-filter 内联样式 → 0ms
-  // 三者视觉效果一样，所以选最便宜的那个。CSS 里保留 24px 作为脚本尚未接管时的兜底。
-  const applySidebarBlur = () => {
-    const el = document.querySelector(SIDEBAR_SEL);
-    if (!el) return;
-    const want = "blur(" + (tunables.sidebarBlur * 0.24).toFixed(2) + "px) saturate(1.15)";
-    if (el.style.backdropFilter !== want) el.style.backdropFilter = want;
+  // 三者视觉效果一样，所以选最便宜的那个。
+  //
+  // ⚠️ 只给**顶层**玻璃面写。后代写了也白写：父级一旦有 backdrop-filter 就建立了新的
+  //    backdrop root，后代的 backdrop-filter 只能模糊到父级内部（实测 blur(40px) 依然清晰穿透）。
+  const GLASS_SURFACES = [SIDEBAR_SEL, ".cr-input-container", ".wb-home-page__main-content"];
+  // saturate 用 1.3、brightness 1.04、contrast 1.01 —— 这是 dsh-wallpaper-engine 实际写入的值
+  // （不是它 CSS 里的兜底 1.8）。隔着玻璃看到的颜色比直接看更艳，这正是"液态"观感的来源。
+  const GLASS_FILTER_TAIL = " saturate(1.3) brightness(1.04) contrast(1.01)";
+  const applyGlassBlur = () => {
+    const want = "blur(" + (tunables.glassBlur * 0.3).toFixed(2) + "px)" + GLASS_FILTER_TAIL;
+    for (const selector of GLASS_SURFACES) {
+      const el = document.querySelector(selector);
+      if (el && el.style.backdropFilter !== want) el.style.backdropFilter = want;
+    }
+  };
+
+  // 颜色类参数（遮罩浓度 / 玻璃通透 / 高光 / 描边）只能走 CSS 自定义属性 ——
+  // 它们参与 color-mix 与 box-shadow 的计算，没法内联到某一个元素上。
+  // 但写 html 变量会让整篇样式失效重算（实测 23ms/次），所以用 rAF 节流：
+  // 一帧最多落一次，拖动中不会把主线程占满。外观调节本来就是精细操作，这个频率够用。
+  let glassVarFrame = 0;
+  const writeGlassVars = () => {
+    glassVarFrame = 0;
+    const root = document.documentElement;
+    const setVar = (name, value) => {
+      if (root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value);
+    };
+    setVar("--wb-glass-blur-px", (tunables.glassBlur * 0.3).toFixed(2) + "px");
+    setVar("--wb-glass-tint", Math.round(tunables.glassTint) + "%");
+    setVar("--wb-glass-sheen", (tunables.glassSheen * 0.0064).toFixed(3));
+    setVar("--wb-glass-border", (tunables.glassBorder * 0.0032).toFixed(3));
+    setVar("--wb-scrim-alpha", (tunables.scrim * 0.01).toFixed(3));
+  };
+  const scheduleGlassVars = () => {
+    if (glassVarFrame) return;
+    glassVarFrame = requestAnimationFrame(writeGlassVars);
   };
 
   const applyTunables = () => {
+    // ① 壁纸模糊：内联 filter —— 唯一一个必须"零延迟跟手"的参数
     const blurPx = tunables.bgBlur * 0.3;
     if (bgLayer) {
       // 模糊≈0 时不挂 filter：blur(0px) 照样会建一层全屏合成层，白付显存。
@@ -65,9 +117,17 @@
       const wantInset = blurPx >= 0.5 ? (-2 * blurPx).toFixed(2) + "px" : "0px";
       if (bgLayer.style.inset !== wantInset) bgLayer.style.inset = wantInset;
     }
-    applySidebarBlur();
+    // ② 磨砂遮罩：内联背景色，同为 0ms
+    if (weScrimEl) {
+      const want = "rgba(6, 10, 18, " + (tunables.scrim * 0.01).toFixed(3) + ")";
+      if (weScrimEl.style.background !== want) weScrimEl.style.background = want;
+    }
+    // ③ 玻璃模糊：内联 backdrop-filter，0ms
+    applyGlassBlur();
+    // ④ 其余颜色类参数：节流后落变量
+    scheduleGlassVars();
   };
-  reapplySidebarBlur = applySidebarBlur;
+  reapplySidebarBlur = applyGlassBlur;
 
   const ICON_HIDDEN_KEY = "anonbuddySkinIconHidden";
   const readIconHidden = () => {
@@ -218,6 +278,14 @@
     // 图层的内容（底色/遮罩/hero）全部由 skin.css 的 #anonbuddy-skin-bg 规则给，
     // 这里只负责 append + 后面用内联样式驱动模糊。
     document.body.appendChild(bgLayer);
+
+    // 磨砂遮罩：压在壁纸之上、内容之下的一层。挂成 bgLayer 的子元素，
+    // 所以它天然落在 z-index:-1 这一层里，不需要额外调层级（内容照旧压在上面）。
+    // 它的职责不是"挡住壁纸"，而是把壁纸对比度压下来保证文字可读 ——
+    // 所以默认值刻意给低（0.25），压太黑玻璃就透不出壁纸的颜色了。
+    weScrimEl = document.createElement("div");
+    weScrimEl.dataset.wbWeScrim = "1";
+    bgLayer.appendChild(weScrimEl);
   }
 
   // 启动时应用哪个主题：

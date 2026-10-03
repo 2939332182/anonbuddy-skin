@@ -133,6 +133,64 @@ const findPreview = async (entryDir) => {
 };
 
 /**
+ * 解析**一个**含 project.json 的 WE 项目目录 → 条目数组（0 或 1 条）。
+ *
+ * 工坊扫描与手动目录共用这一套分类规则（见文件头的分类表），别在两处各写一遍 —— 会漂。
+ *
+ * @param {string} entryDir 项目根目录
+ * @param {{id?:string, fallbackTitle?:string}} [opts]
+ *   `id` 由调用方决定：工坊用数字目录名，手动目录用路径哈希（manualId）。
+ *   `fallbackTitle` 是 project.json 既无 title 也无 project.title 时的兜底显示名。
+ * @returns {Promise<Array<{id:string,title:string,kind:"video"|"preview",path:string,size:number,rawType:string,rating:string,previewPath:string|null,previewSize:number,pkgPath?:string|null,pkgBytes?:number}>>}
+ */
+export const resolveProject = async (entryDir, opts = {}) => {
+  const manifestPath = join(entryDir, "project.json");
+  if (!existsSync(manifestPath)) return [];
+  const manifest = await readJsonLoose(manifestPath);
+  if (!manifest) return [];
+
+  const rawType = String(manifest.type ?? "").toLowerCase();
+  // 无 type + 有 preset → 预设（配置覆盖层），不是独立壁纸
+  if (!rawType) return [];
+
+  const id = opts.id ?? basename(entryDir);
+  const title = String(manifest.title ?? manifest.project?.title ?? opts.fallbackTitle ?? id);
+  const rating = deriveRating(manifest.contentrating, title);
+
+  // 预览图（创意工坊缩略图）always 顺手取一下：视频条目也用它来取色 / 当 poster 兜底
+  const preview = await findPreview(entryDir);
+  const previewSize = preview ? (await stat(preview)).size : 0;
+
+  if (rawType === "video") {
+    const video = await findVideo(entryDir, manifest.file);
+    if (video) {
+      return [{
+        id, title, kind: "video", path: video.path, size: video.size, rawType, rating,
+        previewPath: preview, previewSize,
+      }];
+    }
+  }
+
+  // scene / web / 拿不到视频的 video：退化成静态预览图
+  // scene 额外带上 scene.pkg 路径 —— 用户提供了 RePKG 时可以解出原始 4K 贴图（见 we-extract.mjs），
+  // 渲染层则用 WebWallGL 直读 pkg 做实时渲染（见 src/inject/07-wallpaper-engine.js），所以要带 pkgBytes
+  if (preview || rawType === "scene") {
+    const pkgPath = join(entryDir, "scene.pkg");
+    const hasPkg = rawType === "scene" && existsSync(pkgPath);
+    // pkg 体积是渲染层的预判依据：几十 MB 的包解/读都要付代价，值得先知道
+    const pkgBytes = hasPkg ? await stat(pkgPath).then((s) => s.size, () => 0) : 0;
+    return [{
+      id, title, kind: "preview", path: preview ?? pkgPath, size: previewSize, rawType, rating,
+      previewPath: preview, previewSize,
+      pkgPath: hasPkg ? pkgPath : null,
+      pkgBytes,
+    }];
+  }
+
+  return [];
+};
+
+/**
  * 盘点一个工坊目录。
  * @returns {Promise<Array<{id:string,title:string,kind:"video"|"preview",path:string,size:number,rawType:string}>>}
  */
@@ -143,48 +201,7 @@ export const scanWorkshopDir = async (dir) => {
 
   for (const id of ids) {
     if (!/^\d{6,12}$/.test(id)) continue;
-    const entryDir = join(dir, id);
-    const manifestPath = join(entryDir, "project.json");
-    if (!existsSync(manifestPath)) continue;
-    const manifest = await readJsonLoose(manifestPath);
-    if (!manifest) continue;
-
-    const rawType = String(manifest.type ?? "").toLowerCase();
-    // 无 type + 有 preset → 预设（配置覆盖层），不是独立壁纸
-    if (!rawType) continue;
-
-    const title = String(manifest.title ?? manifest.project?.title ?? id);
-    const rating = deriveRating(manifest.contentrating, title);
-
-    // 预览图（创意工坊缩略图）always 顺手取一下：视频条目也用它来取色 / 当 poster 兜底
-    const preview = await findPreview(entryDir);
-    const previewSize = preview ? (await stat(preview)).size : 0;
-
-    if (rawType === "video") {
-      const video = await findVideo(entryDir, manifest.file);
-      if (video) {
-        out.push({
-          id, title, kind: "video", path: video.path, size: video.size, rawType, rating,
-          previewPath: preview, previewSize,
-        });
-        continue;
-      }
-    }
-
-    // scene / web / 拿不到视频的 video：退化成静态预览图
-    // scene 额外带上 scene.pkg 路径 —— 用户提供了 RePKG 时可以解出原始 4K 贴图（见 we-extract.mjs）
-    if (preview || rawType === "scene") {
-      const pkgPath = join(entryDir, "scene.pkg");
-      const hasPkg = rawType === "scene" && existsSync(pkgPath);
-      // pkg 体积是渲染层的预判依据：几十 MB 的包解/读都要付代价，值得先知道
-      const pkgBytes = hasPkg ? await stat(pkgPath).then((s) => s.size, () => 0) : 0;
-      out.push({
-        id, title, kind: "preview", path: preview ?? pkgPath, size: previewSize, rawType, rating,
-        previewPath: preview, previewSize,
-        pkgPath: hasPkg ? pkgPath : null,
-        pkgBytes,
-      });
-    }
+    out.push(...(await resolveProject(join(dir, id), { id, fallbackTitle: id })));
   }
 
   out.sort((a, b) => (a.kind === b.kind ? a.title.localeCompare(b.title) : a.kind === "video" ? -1 : 1));
@@ -211,7 +228,8 @@ export const toFileUrl = (absolutePath) => {
 
 // ---------------------------------------------------------------- 手动目录
 // 面板里的手动目录行：没有 Wallpaper Engine（或想用零散素材）时，
-// 把任意文件夹加进来就是壁纸库。与工坊扫描共用 resolveProject 的分类规则。
+// 把任意文件夹加进来就是壁纸库。含 project.json 的目录交给 resolveProject 走工坊那套分类规则
+// —— 于是手动收进来的 WE 场景项目同样会带上 pkgPath/pkgBytes，能进实时渲染那条路。
 // 支持：散装 .mp4/.webm 视频与图片、单个 WE 项目、项目合集、WE 安装根 / Steam 库根。
 
 const MANUAL_VIDEO_EXT = new Set([".mp4", ".webm"]);
@@ -260,7 +278,7 @@ export const scanManualDir = async (input) => {
     try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
     // 同层有 project.json：这是一个 WE 项目目录，交给工坊那套分类规则
     if (entries.some((e) => e.isFile() && e.name === "project.json")) {
-      items.push(...(await resolveProject(dir, basename(dir))));
+      items.push(...(await resolveProject(dir, { id: manualId(dir), fallbackTitle: basename(dir) })));
       return;
     }
     for (const entry of entries) {

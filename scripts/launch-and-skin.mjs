@@ -14,11 +14,12 @@
 //   node scripts/launch-and-skin.mjs --no-restart    发现裸启动实例时直接报错
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { findNode, findWorkBuddyExe, portForExe, processNameFor } from "../src/platform/workbuddy-path.mjs";
+import { resolveStudioPaths } from "../src/constants.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -196,6 +197,9 @@ async function main() {
   execFileSync(node, [cli, "apply", "--port", String(port), "--theme", args.theme], {
     stdio: "inherit",
     cwd: ROOT,
+    // 父进程是被 wscript 以隐藏窗口拉起来的，但没有 windowsHide 时 Node 仍可能在
+    // 某些宿主下为子进程另开一个控制台 —— 显式关掉，启动路径上不留任何窗口。
+    windowsHide: true,
   });
   console.log("完成。去 WorkBuddy 右上角找那颗浮动按钮。");
 
@@ -214,11 +218,14 @@ async function main() {
     const script = existsSync(guard) ? guard : existsSync(watcher) ? watcher : null;
     if (script) {
       const name = basename(script);
-      const already = listWatchers().some((line) => line.includes(name) && line.includes(String(port)));
-      if (already) {
-        console.log(`端口 ${port} 的补注入进程已经在跑了。`);
+      const runningPid = liveGuardPid(port);
+      if (runningPid) {
+        console.log(`端口 ${port} 的补注入进程已经在跑了（PID ${runningPid}）。`);
       } else {
-        spawn(node, [script, String(port)], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+        const child = spawn(node, [script, String(port)], { detached: true, stdio: "ignore", windowsHide: true });
+        // 记下 pid：下次启动靠它判断"守护已经在跑"，不必再去问系统。
+        child.unref();
+        writeGuardPid(port, child.pid);
         console.log(
           name === "skin-guard.mjs"
             ? "常驻守护已启动：后开的窗口一出生就带皮肤（无需等待）。"
@@ -237,53 +244,187 @@ async function main() {
     const setupScript = join(ROOT, "scripts", "setup-autoskin.ps1");
     if (!existsSync(setupScript)) {
       console.log("找不到 scripts\\setup-autoskin.ps1，跳过快捷方式绑定。");
-      return;
-    }
-    console.log("");
-    console.log("把桌面图标、开始菜单和开机自启接到这套启动流程上……");
-    const bound = spawnSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        setupScript,
-        "-WorkBuddyExe",
-        exe,
-        "-Port",
-        String(port),
-      ],
-      { cwd: ROOT, stdio: "inherit" },
-    );
-    if (bound.status === 0) {
-      console.log("");
-      console.log("完成。以后开机、双击图标都是自带皮肤的。");
-      console.log("想撤销这些改动：powershell -File scripts\\setup-autoskin.ps1 -Undo");
     } else {
       console.log("");
-      console.log(`快捷方式绑定没成功（退出码 ${bound.status}），但皮肤已经生效，这次照常能用。`);
+      console.log("把桌面图标、开始菜单和开机自启接到这套启动流程上……");
+      const bound = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          setupScript,
+          "-WorkBuddyExe",
+          exe,
+          "-Port",
+          String(port),
+        ],
+        { cwd: ROOT, stdio: "inherit", windowsHide: true },
+      );
+      if (bound.status === 0) {
+        console.log("");
+        console.log("完成。以后开机、双击图标都是自带皮肤的。");
+        console.log("想撤销这些改动：powershell -File scripts\\setup-autoskin.ps1 -Undo");
+      } else {
+        console.log("");
+        console.log(`快捷方式绑定没成功（退出码 ${bound.status}），但皮肤已经生效，这次照常能用。`);
+      }
     }
+  }
+
+  // --- 6. 自愈开机自启值 ----------------------------------------------------
+  // 刻意放在最后：此刻 WorkBuddy 已经启动完成，它对自己 Run 值的那一次重写也已经落地，
+  // 所以这次写入能盖住它。详见 ensureAutostart 的注释。
+  const repaired = ensureAutostart(exe, port);
+  if (repaired > 0) {
+    console.log("");
+    console.log(`开机自启项已修复 ${repaired} 处 —— WorkBuddy 会把自己的 Run 值改回裸 exe，这里补回静默启动器。`);
   }
 }
 
-/** 找已经在跑的 watcher，避免每点一次启动器就多堆一个进程 */
-function listWatchers() {
+// ---- 守护进程的 pid 文件 ---------------------------------------------------
+// 启动器只需要回答一个问题："这个端口是不是已经有守护在跑了？"
+//
+// 以前是去问系统：起一个 powershell.exe 跑 Get-CimInstance 列出所有 node 的命令行。
+// 那有两个代价，在开机路径上都不能接受：
+//   1. 每次启动都拉起一个 PowerShell 进程 —— 用户看得见，也正是"怎么老弹 powershell"的来源；
+//   2. 枚举全部 node 进程要几百毫秒，只为拿到一条本可以自己记下来的事实。
+//
+// 现在：守护启动时把自己的 pid 写进 %LOCALAPPDATA%\AnonBuddySkin\guard-<port>.pid，
+// 启动器读文件 + tasklist 验活（tasklist 带 windowsHide，不建窗口）。
+// 文件缺失、pid 已死、进程被别人复用 —— 一律当作"没在跑"，最坏结果只是多起一个守护，
+// 而多一个守护是幂等的（新文档照样只注入一次）。
+function guardPidPath(port) {
+  return join(resolveStudioPaths().stateRoot, `guard-${port}.pid`);
+}
+
+function writeGuardPid(port, pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
   try {
-    const out = execFileSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object -ExpandProperty CommandLine",
-      ],
-      { encoding: "utf8", timeout: 10000, windowsHide: true },
-    );
-    return out.split(/\r?\n/).filter(Boolean);
+    writeFileSync(guardPidPath(port), String(pid), "utf8");
+  } catch {
+    /* 写不进去不影响本次启动，只是下次会重新起一个守护 */
+  }
+}
+
+/** 返回仍然活着的守护 pid，没有则返回 0（顺手清掉过期文件） */
+function liveGuardPid(port) {
+  const file = guardPidPath(port);
+  let pid = 0;
+  try {
+    pid = Number(readFileSync(file, "utf8").trim());
+  } catch {
+    return 0;
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return 0;
+  try {
+    const out = execFileSync("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+    });
+    if (out.includes(`"${pid}"`)) return pid;
+  } catch {
+    /* tasklist 失败时按"没在跑"处理：多起一个守护无害，漏起一个才是故障 */
+  }
+  try {
+    rmSync(file, { force: true });
+  } catch {
+    /* 删不掉就算了，下次照样会走"pid 已死"这条分支 */
+  }
+  return 0;
+}
+
+// ---- 开机自启值的自愈 ------------------------------------------------------
+// WorkBuddy 每次启动都会把它**自己**的 Run 值写回裸 exe（不带调试端口）——那是 Electron
+// setLoginItemSettings 的标准行为。所以"绑一次、永久有效"不成立。本机实测证据：
+// autoskin-setup.json 里记着 Run 值被绑过，而 -Undo 从没跑过（跑了会删掉这个状态文件，
+// 文件还在），但今天读回来的两个 Run 值都是裸 exe —— 只能是被应用自己改回去的。
+//
+// 于是这里在**启动流程末尾**复查一次。这个时机是刻意选的：那一刻 WorkBuddy 早已启动完成，
+// 它那次重写也已经落地，所以这一次写入能盖住它。下次开机两个 Run 值都指向静默启动器，
+// 谁先执行都无所谓 —— 后执行的那个会发现 CDP 已经就绪，只重新注入一次（全程幂等）。
+//
+// 只用 reg.exe（带 windowsHide）读写，不起 PowerShell：这是开机路径，多一个进程都算噪声。
+const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+// 每个产品线一条自己的自启值。名字里必须带版本：国际版与国内版是可以并存的
+// （单实例锁、任务栏分组、卸载项 GUID 都不同），共用一个值名只会让后配置的那个
+// 覆盖掉前一个 —— 结果就是"配好了一版，另一版开机又变成裸的"。
+const ourRunName = (exe) => "AnonBuddySkin." + basename(exe, ".exe");
+
+function regQueryRun() {
+  let out = "";
+  try {
+    out = execFileSync("reg.exe", ["query", RUN_KEY], { encoding: "utf8", timeout: 10000, windowsHide: true });
   } catch {
     return [];
   }
+  const rows = [];
+  // reg query 的格式是：4 空格 名称 4 空格 类型 4 空格 数据
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^\s{4}(.+?)\s{4}(REG_\w+)\s{4}(.*)$/.exec(line);
+    if (m) rows.push({ name: m[1].trim(), value: m[3] });
+  }
+  return rows;
+}
+
+function regSetRun(name, value) {
+  execFileSync("reg.exe", ["add", RUN_KEY, "/v", name, "/t", "REG_SZ", "/d", value, "/f"], {
+    encoding: "utf8",
+    timeout: 10000,
+    windowsHide: true,
+  });
+}
+
+/** 取一条 Run 值里被启动的那个程序（剥掉引号），取不到返回 "" */
+function runValueTarget(value) {
+  const quoted = /^\s*"([^"]+)"/.exec(value);
+  if (quoted) return quoted[1];
+  const bare = /^\s*(\S+)/.exec(value);
+  return bare ? bare[1] : "";
+}
+
+/**
+ * 让开机自启值回到"指向静默启动器"的状态。返回修好的条数。
+ * 只动两类值：我们自己那条，以及**确实指向本次要启动的这个 exe** 的值。
+ * 用户的其它自启项一概不碰。
+ */
+function ensureAutostart(exe, port) {
+  const vbs = join(ROOT, "scripts", "autoskin-launch.vbs");
+  if (!existsSync(vbs)) return 0;
+  const wscriptExe = join(process.env.SystemRoot || "C:\\Windows", "System32", "wscript.exe");
+  const want = `"${wscriptExe}" "${vbs}" --exe "${exe}" --port ${port}`;
+  const wantKey = exe.toLowerCase();
+  const mineName = ourRunName(exe);
+  let fixed = 0;
+
+  const rows = regQueryRun();
+
+  const mine = rows.find((row) => row.name === mineName);
+  if (!mine || mine.value !== want) {
+    try {
+      regSetRun(mineName, want);
+      fixed += 1;
+    } catch {
+      /* 注册表写不进去不该让整次启动失败 */
+    }
+  }
+
+  for (const row of rows) {
+    if (row.name === mineName) continue;
+    if (/autoskin-launch\.vbs/i.test(row.value)) continue; // 已经绑好了
+    if (runValueTarget(row.value).toLowerCase() !== wantKey) continue; // 不是在启动这个 exe
+    try {
+      regSetRun(row.name, want);
+      fixed += 1;
+    } catch {
+      /* 同上 */
+    }
+  }
+
+  return fixed;
 }
 
 main().catch((error) => {

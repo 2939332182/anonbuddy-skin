@@ -71,7 +71,7 @@ export const CSS_SENTINELS = {
   text: "#0a0b0c",
 };
 
-export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, wwglUrl = null, activeHint = null, reportBinding = null }) {
+export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTemplate = "", restoreLast = false, iconDataUrl = null, weItems = [], weRepkgAvailable = false, wwglUrl = null, activeHint = null, reportBinding = null, version = null, repo = null }) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error("皮肤菜单至少需要一个主题");
   }
@@ -137,6 +137,13 @@ export function buildSkinMenuScript({ entries, activeId, styleId, menuId, cssTem
     // 而下面返回的整段脚本是模板字符串，在 renderer 里 eval，读不到 Node 侧作用域。
     // 直接写 DEFAULT_ACCENT 会抛 ReferenceError（2026-09-19 踩过，见 scripts/lint-menu.mjs 的泄漏体检）。
     defaultAccent: DEFAULT_ACCENT,
+    // 版本号与仓库地址（来自 package.json，见 constants.mjs 的 readProductInfo）。
+    // 设置面板底部的「关于」用它们做两件事：查 GitHub 最新 Release 判断有没有新版，
+    // 以及给一个可点击的项目链接。两者都允许缺失，缺失时那一块只是不渲染。
+    // ⚠️ repo 必须卡成 https://github.com/<owner>/<repo> 这一种形状：它会被拼进
+    //    api.github.com 的 URL 里，宽松放行等于让 payload 决定请求打到哪儿。
+    version: typeof version === "string" && version ? version : null,
+    repo: typeof repo === "string" && /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+$/i.test(repo) ? repo : null,
   });
 
   // 头尾保持一字不差：正文分片是从原模板求值后的产物逐字节切出来的，拼接结果与拆分前完全等价。

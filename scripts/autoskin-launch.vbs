@@ -10,6 +10,12 @@
 ' console; a resident watcher script would sit in memory forever. This does the
 ' job with neither cost.
 '
+' HARD RULE: this file must never spawn a console process of its own. That means
+' no WScript.Shell.Exec(), no "cmd /c", no "powershell". Every one of those shows
+' a window for a moment, and this launcher runs on the boot path where any flicker
+' is visible. The one permitted child is node itself, started hidden through
+' shell.Run(cmd, 0, False) below.
+'
 ' It runs scripts/launch-and-skin.mjs. Extra arguments are passed straight
 ' through, so a shortcut can carry e.g.:
 '   --prefer cn --port 9334
@@ -55,25 +61,33 @@ Next
 ' 0 = hidden window, False = do not wait for it to finish.
 shell.Run cmd, 0, False
 
-' Locate node.exe: PATH first, then the copy WorkBuddy unpacks for itself
-' (international .workbuddy-ai / China .workbuddy).
+' Locate node.exe. Two probes, neither of which creates a window:
+'   1) walk %PATH% with the filesystem object;
+'   2) fall back to the copy WorkBuddy unpacks for itself.
+'
+' Do NOT reintroduce WScript.Shell.Exec("cmd /c where node.exe") here. Exec()
+' starts a real console and SHOWS it, so the lookup itself flashed a black cmd
+' window on every single launch -- including the one triggered at boot, which is
+' exactly the flash users reported. fso.FileExists does the same lookup silently.
 Function FindNode()
-  Dim probe, line, roots, i, root, folder, sub_
+  Dim pathVar, parts, i, candidate, roots, root, folder
 
-  ' 1) whatever is on PATH
-  On Error Resume Next
-  Set probe = shell.Exec("cmd /c where node.exe 2>nul")
-  If Err.Number = 0 Then
-    If Not probe.StdOut.AtEndOfStream Then
-      line = Trim(probe.StdOut.ReadLine())
-      If line <> "" Then
-        FindNode = line
+  ' 1) whatever is on PATH. Strip the quoting and trailing separator that some
+  '    installers leave in PATH entries.
+  pathVar = shell.ExpandEnvironmentStrings("%PATH%")
+  parts = Split(pathVar, ";")
+  For i = 0 To UBound(parts)
+    candidate = Trim(parts(i))
+    If Left(candidate, 1) = """" Then candidate = Mid(candidate, 2)
+    If Right(candidate, 1) = """" Then candidate = Left(candidate, Len(candidate) - 1)
+    If Right(candidate, 1) = "\" Then candidate = Left(candidate, Len(candidate) - 1)
+    If Len(candidate) > 1 Then
+      If fso.FileExists(candidate & "\node.exe") Then
+        FindNode = candidate & "\node.exe"
         Exit Function
       End If
     End If
-  End If
-  Err.Clear
-  On Error GoTo 0
+  Next
 
   ' 2) the copy WorkBuddy ships with
   roots = Array(".workbuddy-ai", ".workbuddy")

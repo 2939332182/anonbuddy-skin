@@ -216,13 +216,14 @@
     // 开关状态可能被别处改（例如测试重置），每次打开面板都重读一次
     pane.__syncSwitch = syncSwitch;
 
-    // ---- 分组 4：外观调节（两个 1..100 的滑块）----
+    // ---- 分组 4：外观调节（壁纸 / 液态玻璃 两组滑块）----
+    // 2026-10-04 从"两个滑块"扩成一套外观系统。分组是必要的：六项平铺的话，
+    // 用户分不清"壁纸模糊"和"玻璃模糊"分别动的是谁。
     const tuneGroup = document.createElement("div");
     const tuneLabel = document.createElement("p");
     tuneLabel.textContent = "外观调节";
     tuneLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
-    const tuneCard = document.createElement("div");
-    tuneCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);";
+    tuneGroup.appendChild(tuneLabel);
     const tuneSyncers = [];
     const mkSlider = (spec) => {
       const rowEl = document.createElement("div");
@@ -238,7 +239,7 @@
 
       const input = document.createElement("input");
       input.type = "range";
-      input.min = "1";
+      input.min = "0";
       input.max = "100";
       input.step = "1";
       input.dataset.wbTunable = spec.key;
@@ -275,12 +276,27 @@
       sync();
       return rowEl;
     };
-    TUNABLE_SPEC.forEach((spec, index) => {
+    // 按 spec.group 分组渲染：每组一个小标题 + 一张卡片。
+    // 顺序以 TUNABLE_SPEC 里第一次出现该组的次序为准（壁纸在前、液态玻璃在后）。
+    const tuneBuckets = [];
+    for (const spec of TUNABLE_SPEC) {
+      const name = spec.group || "外观";
+      let bucket = tuneBuckets.find((entry) => entry.name === name);
+      if (!bucket) {
+        const caption = document.createElement("p");
+        caption.textContent = name;
+        caption.style.cssText = "margin:0 0 6px;font:500 12px/1.4 system-ui;opacity:.5;";
+        const card = document.createElement("div");
+        card.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);margin-bottom:10px;";
+        bucket = { name, card, count: 0 };
+        tuneBuckets.push(bucket);
+        tuneGroup.append(caption, card);
+      }
       const el = mkSlider(spec);
-      if (index > 0) el.style.borderTop = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
-      tuneCard.appendChild(el);
-    });
-    tuneGroup.append(tuneLabel, tuneCard);
+      if (bucket.count > 0) el.style.borderTop = "1px solid var(--wb-pane-border,rgba(0,0,0,.06))";
+      bucket.count += 1;
+      bucket.card.appendChild(el);
+    }
     // 值可能被别处改（测试/重置），每次打开面板都重读一次
     pane.__syncTunables = () => {
       for (const spec of TUNABLE_SPEC) tunables[spec.key] = clampTunable(spec, readTunables()[spec.key]);
@@ -601,7 +617,9 @@
       // 静音时标明状态：声音开关是独立的一行，只拖音量滑块不会解除静音
       //（浏览器不允许非静音自动播放，所以默认是静音起播）。
       // 不提示的话很容易误判成"音量功能坏了"。
-      volumeText.textContent = weSound ? weVolume + "%" : weVolume + "% 静音";
+      // 静音 / 暂停都是在"用户设的那个音量"之外的叠加状态，所以读数要把原因一并写出来，
+      // 否则用户会以为"音量没生效"。暂停时 weVolume 保持原值不变（见 effectiveVolume）。
+      volumeText.textContent = weVolume + "%" + (weSound ? (wePaused ? " 暂停" : "") : " 静音");
 
       for (const [id, pill] of ratingPills) {
         const on = id === weFilter;
@@ -702,7 +720,217 @@
     syncWeUi();
     syncWeButtons();
 
+    // ---- 分组 6：关于（版本 / 检查更新 / 项目地址）----
+    // 摆在最底部：低频操作，不该去抢上面那些日常开关的位置。
+    // 版本号与仓库地址来自 payload（Node 侧读 package.json，见 constants.mjs）。
+    // 两者都缺失就整块不渲染 —— 宁可少一行，也不要放一个点了没反应的按钮。
+    let aboutGroup = null;
+    if (data.version || data.repo) {
+      aboutGroup = document.createElement("div");
+      const aboutLabel = document.createElement("p");
+      aboutLabel.textContent = "插件更新";
+      aboutLabel.style.cssText = "margin:0 0 8px;font:500 13px/1.4 system-ui;opacity:.6;";
+      const aboutCard = document.createElement("div");
+      aboutCard.style.cssText = "border-radius:12px;border:1px solid var(--wb-pane-border,rgba(0,0,0,.08));background:var(--wb-pane-card,#fff);";
+
+      // ---------- 行 1：版本 + 检查更新 ----------
+      const updateRow = document.createElement("div");
+      updateRow.style.cssText = "display:flex;align-items:center;gap:10px;padding:12px 14px;";
+      const updateCopy = document.createElement("div");
+      updateCopy.style.cssText = "flex:1;min-width:0;";
+      const updateTitle = document.createElement("div");
+      updateTitle.textContent = data.version ? "当前版本 v" + data.version : "当前版本未知";
+      const updateDesc = document.createElement("div");
+      updateDesc.dataset.wbUpdateDesc = "1";
+      updateDesc.textContent = "检查 GitHub 上有没有更新的版本。";
+      updateDesc.style.cssText = "font-size:12px;opacity:.55;margin-top:2px;";
+      updateCopy.append(updateTitle, updateDesc);
+      const checkBtn = mkWeBtn("检查更新", false);
+      checkBtn.dataset.wbCheckUpdate = "1";
+      checkBtn.style.cssText += "flex:none;padding:7px 12px;";
+      updateRow.append(updateCopy, checkBtn);
+
+      // 恢复描述行的默认文案与配色（检查结束后调用）
+      const descIdle = () => {
+        updateDesc.textContent = "检查 GitHub 上有没有更新的版本。";
+        updateDesc.style.opacity = ".55";
+      };
+
+      // 版本比较。不要用字符串比大小：1.0.10 会被判成小于 1.0.9。
+      const parseVer = (value) => String(value).replace(/^v/i, "").split(/[.+-]/).map((part) => parseInt(part, 10) || 0);
+      const cmpVer = (a, b) => {
+        const pa = parseVer(a);
+        const pb = parseVer(b);
+        const n = Math.max(pa.length, pb.length);
+        for (let i = 0; i < n; i += 1) {
+          const d = (pa[i] || 0) - (pb[i] || 0);
+          if (d !== 0) return d > 0 ? 1 : -1;
+        }
+        return 0;
+      };
+
+      let checkResetTimer = null;
+      // 有新版本时，按钮变成"去下载"，点它打开 Release 页。
+      // 真正把新版本落到本地做不到 —— 那要替换正在运行的包目录，还得让用户重启应用；
+      // 插件能做的边界就是"把正确的下载页递到用户手上"，所以这里不假装能一键装完。
+      let pendingPage = null;
+
+      const resetCheckButton = () => {
+        if (checkResetTimer !== null) {
+          clearTimeout(checkResetTimer);
+          checkResetTimer = null;
+        }
+        checkBtn.textContent = "检查更新";
+        checkBtn.style.background = "";
+        checkBtn.style.borderColor = "";
+        checkBtn.style.color = "";
+        checkBtn.style.cursor = "";
+        pendingPage = null;
+        descIdle();
+      };
+
+      // 「已是最新版」的反馈动画。目标是一眼就懂，但不要弹窗、不要挡住面板：
+      //   ① 文字就地换成 ✓ 已是最新版，整块转绿
+      //   ② 按钮走一次带回弹的缩放（cubic-bezier 过冲），同时从边框扩散一圈绿色光晕
+      //   ③ 三秒后自己回到初始态
+      // 全部走 Web Animations API，**不往 <style> 里插规则**：设置弹窗里 2700+ 元素，
+      // 改样式表会触发全量重算（这个文件里已经为同样的原因绕过两次）。
+      const celebrateLatest = () => {
+        checkBtn.textContent = "\u2713 已是最新版";
+        checkBtn.style.background = "rgba(63,158,90,.14)";
+        checkBtn.style.borderColor = "rgba(63,158,90,.55)";
+        checkBtn.style.color = "#3f9e5a";
+        updateDesc.textContent = "已是最新版，无需更新。";
+        updateDesc.style.opacity = ".8";
+        try {
+          checkBtn.animate(
+            [
+              { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(63,158,90,.5)" },
+              { transform: "scale(1.12)", boxShadow: "0 0 0 9px rgba(63,158,90,0)", offset: 0.55 },
+              { transform: "scale(.97)", boxShadow: "0 0 0 0 rgba(63,158,90,0)" },
+              { transform: "scale(1)", boxShadow: "0 0 0 0 rgba(63,158,90,0)" },
+            ],
+            { duration: 720, easing: "cubic-bezier(.34,1.56,.64,1)" },
+          );
+        } catch (error) { /* 动画不支持也不该影响结论 */ }
+        checkResetTimer = setTimeout(resetCheckButton, 3200);
+      };
+
+      const announceUpdate = (latest, page) => {
+        pendingPage = page;
+        checkBtn.textContent = "去下载 v" + latest;
+        checkBtn.style.background = "var(--wb-pane-accent,#24c9d7)";
+        checkBtn.style.borderColor = "transparent";
+        checkBtn.style.color = "#fff";
+        checkBtn.style.cursor = "pointer";
+        updateDesc.textContent = "发现新版本 v" + latest + "，点右边按钮打开下载页。";
+        updateDesc.style.opacity = ".85";
+        try {
+          checkBtn.animate(
+            [
+              { transform: "scale(1)" },
+              { transform: "scale(1.1)" },
+              { transform: "scale(1)" },
+            ],
+            { duration: 520, easing: "cubic-bezier(.34,1.56,.64,1)" },
+          );
+        } catch (error) {}
+        checkResetTimer = setTimeout(resetCheckButton, 12000);
+      };
+
+      const checkForUpdate = () => {
+        // 已经在"有新版本"状态时，按钮的职责变成打开下载页
+        if (pendingPage) {
+          try { window.open(pendingPage, "_blank"); } catch (error) {}
+          return;
+        }
+        if (!data.repo) {
+          updateDesc.textContent = "这个包没有带仓库地址，无法检查更新。";
+          updateDesc.style.opacity = ".7";
+          return;
+        }
+        const repoPath = data.repo.replace(/^https:\/\/github\.com\//i, "");
+        checkBtn.disabled = true;
+        checkBtn.style.opacity = ".6";
+        checkBtn.textContent = "检查中…";
+
+        const apiHeaders = { Accept: "application/vnd.github+json" };
+        fetch("https://api.github.com/repos/" + repoPath + "/releases/latest", {
+          headers: apiHeaders,
+          signal: AbortSignal.timeout(9000),
+        })
+          .then((res) => {
+            // 没有 Release 的仓库返回 404，那就退一步读 tag 列表
+            if (res.status === 404) {
+              return fetch("https://api.github.com/repos/" + repoPath + "/tags", {
+                headers: apiHeaders,
+                signal: AbortSignal.timeout(9000),
+              }).then((tagRes) => {
+                if (!tagRes.ok) throw new Error("HTTP " + tagRes.status);
+                return tagRes.json().then((tags) => {
+                  const first = Array.isArray(tags) && tags.length ? tags[0] : null;
+                  return { tag: first && first.name ? first.name : null, page: data.repo + "/releases" };
+                });
+              });
+            }
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json().then((info) => ({
+              tag: info && info.tag_name ? info.tag_name : null,
+              page: info && info.html_url ? info.html_url : data.repo + "/releases/latest",
+            }));
+          })
+          .then((result) => {
+            const latest = result.tag ? String(result.tag).replace(/^v/i, "") : "";
+            if (!latest) throw new Error("没读到版本号");
+            if (data.version && cmpVer(latest, data.version) > 0) announceUpdate(latest, result.page);
+            else celebrateLatest();
+          })
+          .catch((error) => {
+            // 离线、被墙、API 限流都会落到这里。说清楚是"没查成"而不是"已是最新"——
+            // 把失败说成最新是最容易让人误判的一种谎。
+            updateDesc.textContent = "检查失败：" + (error && error.message ? error.message : "网络不可用") + "（可稍后再试）";
+            updateDesc.style.opacity = ".75";
+          })
+          .then(() => {
+            checkBtn.disabled = false;
+            checkBtn.style.opacity = "";
+            if (checkBtn.textContent === "检查中…") checkBtn.textContent = "检查更新";
+          });
+      };
+
+      checkBtn.addEventListener("click", checkForUpdate);
+
+      // ---------- 行 2：项目地址 ----------
+      aboutCard.appendChild(updateRow);
+
+      if (data.repo) {
+        const repoRow = document.createElement("a");
+        repoRow.href = data.repo;
+        repoRow.target = "_blank";
+        repoRow.rel = "noreferrer noopener";
+        repoRow.dataset.wbRepoLink = "1";
+        repoRow.style.cssText = "display:flex;align-items:center;gap:10px;padding:12px 14px;" +
+          "border-top:1px solid var(--wb-pane-border,rgba(0,0,0,.06));text-decoration:none;color:inherit;cursor:pointer;";
+        const repoName = document.createElement("span");
+        repoName.textContent = "GitHub 项目地址";
+        repoName.style.cssText = "flex:1;min-width:0;";
+        const repoSlug = document.createElement("span");
+        repoSlug.textContent = data.repo.replace(/^https:\/\/github\.com\//i, "");
+        repoSlug.style.cssText = "flex:none;font:400 12px/1.4 system-ui;opacity:.5;";
+        const repoArrow = document.createElement("span");
+        repoArrow.textContent = "\u2197";
+        repoArrow.style.cssText = "flex:none;opacity:.45;";
+        repoRow.append(repoName, repoSlug, repoArrow);
+        repoRow.addEventListener("mouseenter", () => { repoRow.style.background = "var(--wb-pane-hover,rgba(0,0,0,.04))"; });
+        repoRow.addEventListener("mouseleave", () => { repoRow.style.background = "transparent"; });
+        aboutCard.appendChild(repoRow);
+      }
+
+      aboutGroup.append(aboutLabel, aboutCard);
+    }
+
     body.append(listGroup, addGroup, toggleGroup, tuneGroup, weGroup);
+    if (aboutGroup) body.append(aboutGroup);
     pane.append(body);
     pane.__renderList = renderList;
     pane.__syncSelection = syncPaneSelection;

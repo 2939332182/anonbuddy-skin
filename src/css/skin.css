@@ -697,3 +697,93 @@ body[data-application-name=workbuddy] [data-view-id=sidebar] .conversation-list-
   text-shadow: 0 2px 12px white;
   pointer-events: none;
 }
+
+/* ============================================================
+   外观系统 v2：壁纸 + 磨砂遮罩 + iOS 液态玻璃（2026-10-04）
+   ------------------------------------------------------------
+   原来只有两个滑块（侧边栏毛玻璃 / 背景图模糊），这里把它拆成一套完整的外观调节。
+
+   配方取自 dsh-wallpaper-engine（MIT，elysia395）的实测口径，只搬结论、不搬代码：
+     · 壁纸层与遮罩层都用**负 z-index**（-2 / -1），所以换壁纸时重新 appendChild
+       也不会打乱层级，不依赖 DOM 顺序。
+     · 玻璃的"厚度"来自**三条 inset 阴影**（顶部 1px 高光 + 底部 1px 亮边 + 0.5px 发丝环）
+       外加一层**白釉渐变**，不是来自更强的模糊 —— 模糊只负责把壁纸揉开。
+       该项目全仓 `border-image` / `-webkit-mask` / `mask-composite` 命中数都是 0，
+       也就是说"渐变描边"那类技巧它并没有用。
+     · `saturate` 要拉高（写入值 1.3 附近）：隔着玻璃看到的颜色比直接看更艳，
+       这正是"液态"的观感来源。
+     · 遮罩默认只有 0.25 —— 压太黑，玻璃就透不出壁纸的颜色，而那恰恰是它存在的理由。
+       只有花哨的壁纸才需要用户自己把"磨砂遮罩"往上推。
+
+   ⚠️ 嵌套 backdrop-filter 会失效：父级一旦有 backdrop-filter，它就建立了新的
+      backdrop root，后代的 backdrop-filter 只能模糊到父级内部的东西（实测清晰穿透）。
+      所以玻璃只加在**顶层**玻璃面上，不给它们的后代再加。这一条在下面的
+      [data-view-id=sidebar] 附近已经踩过一次，别再犯。
+
+   变量的写入方是 09-tunables-icon.js；脚本没接管时用这里的兜底值，CSS 单独看也成立。
+   ============================================================ */
+:root {
+  /* 磨砂遮罩浓度（0 = 不压，1 = 全黑）。0.25 是刻意给低的值，理由见上。 */
+  --wb-scrim-alpha: 0.25;
+  /* 玻璃面模糊半径。脚本按滑块写内联 backdrop-filter，这里是脚本未接管时的兜底。 */
+  --wb-glass-blur-px: 16px;
+  /* 玻璃底色不透明度：越低，壁纸透得越明显（"通透"滑块） */
+  --wb-glass-tint: 62%;
+  /* 顶部高光 / 白釉渐变强度（"高光"滑块） */
+  --wb-glass-sheen: 0.32;
+  /* 发丝描边强度（"描边"滑块） */
+  --wb-glass-border: 0.08;
+}
+
+/* ---- 磨砂遮罩层 ----
+ * 压在壁纸之上、内容之下。它的职责不是"挡住壁纸"，而是把壁纸的对比度压下来，
+ * 让前景文字在任何一张壁纸上都读得清。
+ * 挂成 #anonbuddy-skin-bg 的子元素：那一层的 z-index 已经是 -1，而 #root 有
+ * position:relative + z-index:0 稳定压在上面，所以不需要再调层级。
+ * inset 跟着父层走（父层会随"壁纸模糊"反向外扩，遮罩一起外扩正好盖住白边）。
+ */
+#anonbuddy-skin-bg [data-wb-we-scrim] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(6, 10, 18, var(--wb-scrim-alpha, 0.25));
+}
+
+/* ---- 液态玻璃：底色 + 白釉 + 厚度 ----
+ * 这一组是"有边界的面"（侧边栏、输入框、设置面板），才给描边与投影；
+ * 整片铺开的内容区只在下面单独给底色与模糊，否则整屏一圈内阴影会很怪。
+ */
+body[data-application-name=workbuddy] [data-view-id=sidebar],
+body[data-application-name=workbuddy] .cr-input-container,
+body[data-wb-child-window="1"] .settings-navigation,
+body[data-wb-child-window="1"] .settings-modal__content {
+  background-color: color-mix(in srgb, var(--wb-glass) var(--wb-glass-tint, 62%), transparent) !important;
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, calc(0.16 * var(--wb-glass-sheen, 0.32) / 0.32)),
+    rgba(255, 255, 255, calc(0.05 * var(--wb-glass-sheen, 0.32) / 0.32)) 38%,
+    rgba(255, 255, 255, calc(0.02 * var(--wb-glass-sheen, 0.32) / 0.32))) !important;
+  backdrop-filter: blur(var(--wb-glass-blur-px, 16px)) saturate(1.3) brightness(1.04) contrast(1.01);
+  -webkit-backdrop-filter: blur(var(--wb-glass-blur-px, 16px)) saturate(1.3) brightness(1.04) contrast(1.01);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, var(--wb-glass-sheen, 0.32)),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 0.5px rgba(255, 255, 255, var(--wb-glass-border, 0.08)),
+    0 12px 40px rgba(8, 14, 24, 0.12) !important;
+}
+
+/* ---- 液态玻璃：整片内容区 ----
+ * 只给底色与模糊，不给 inset 描边/投影 —— 它占满视口，加了会像给整块屏幕套一层框。
+ */
+body[data-application-name=workbuddy] .wb-home-page__main-content {
+  background-color: color-mix(in srgb, var(--wb-glass) var(--wb-glass-tint, 62%), transparent) !important;
+  backdrop-filter: blur(var(--wb-glass-blur-px, 16px)) saturate(1.3) brightness(1.04) contrast(1.01);
+  -webkit-backdrop-filter: blur(var(--wb-glass-blur-px, 16px)) saturate(1.3) brightness(1.04) contrast(1.01);
+}
+
+/* ---- 玻璃面对比度地板 ----
+ * 玻璃再透，正文也不能掉到读不清。文字色一律从主题文字色派生，不跟着玻璃透明度走，
+ * 这样用户把"玻璃通透"拉到最大时，字的对比度不会一起塌掉。
+ */
+body[data-application-name=workbuddy] [data-view-id=sidebar] {
+  color: var(--wb-text) !important;
+}

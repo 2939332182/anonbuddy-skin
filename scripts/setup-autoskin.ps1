@@ -229,6 +229,21 @@ if ($Undo) {
         Set-ItemProperty -Path $key -Name $name -Value $entry.Args -ErrorAction Stop
         $restored++
         Write-Host "  restored Run value: $($entry.Where)"
+      } elseif ($entry.Kind -eq 'RunKeyNew') {
+        # The value this script created itself. Undo means "put the registry back
+        # the way we found it": delete it when it did not exist before, restore
+        # the old data when it somehow did.
+        $split = $entry.Where -split '\\'
+        $name = $split[-1]
+        $key = ($split[0..($split.Count - 2)] -join '\')
+        if ($entry.Args) {
+          Set-ItemProperty -Path $key -Name $name -Value $entry.Args -ErrorAction Stop
+          Write-Host "  restored our autostart value: $($entry.Where)"
+        } else {
+          Remove-ItemProperty -Path $key -Name $name -ErrorAction Stop
+          Write-Host "  removed our autostart value: $($entry.Where)"
+        }
+        $restored++
       }
     } catch {
       Write-Warning "  could not restore $($entry.Where): $($_.Exception.Message)"
@@ -266,15 +281,15 @@ Write-Host ""
 
 $entries = Get-LaunchEntries -ExePath $WorkBuddyExe
 if ($entries.Count -eq 0) {
-  Write-Host "No launch entries point at that executable -- nothing to bind."
-  Write-Host "Create a shortcut first, or run WorkBuddy once so it registers itself."
-  exit 0
-}
-
-Write-Host "Found $($entries.Count) entry/entries pointing at it:"
-foreach ($e in $entries) {
-  $already = if ($e.Args -like "*autoskin-launch.vbs*") { '  [already bound]' } else { '' }
-  Write-Host "  $($e.Kind): $($e.Where)$already"
+  Write-Host "No shortcut or Run entry points at that executable right now."
+  Write-Host "Existing shortcuts are left alone. The autostart value below is still installed,"
+  Write-Host "and re-running this script later binds any shortcut that shows up."
+} else {
+  Write-Host "Found $($entries.Count) entry/entries pointing at it:"
+  foreach ($e in $entries) {
+    $already = if ($e.Args -like "*autoskin-launch.vbs*") { '  [already bound]' } else { '' }
+    Write-Host "  $($e.Kind): $($e.Where)$already"
+  }
 }
 Write-Host ""
 
@@ -295,6 +310,54 @@ if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Force -Path $Ba
 
 $shell = New-Object -ComObject WScript.Shell
 $changed = New-Object System.Collections.Generic.List[object]
+
+# --- an autostart value of our own ------------------------------------------
+# WHY not just rebind WorkBuddy's own Run value, which this script also does:
+# WorkBuddy writes its OWN value back to the bare exe (no debug port) whenever it
+# launches -- that is Electron's setLoginItemSettings behaviour. Evidence from
+# this machine, and it is conclusive: autoskin-setup.json shows the Run values
+# WERE rebound, -Undo was never run (that would have deleted the state file, and
+# the file is still there), yet both Run values read back as the bare exe today.
+# Something rewrote them, and the only candidate is the app itself. So a rebind
+# there silently reverts and the skin is gone again after the next boot.
+#
+# Our own value carries a name WorkBuddy has never heard of, so it leaves it
+# alone. With BOTH values pointing at the silent launcher the boot order stops
+# mattering: whichever runs first starts WorkBuddy WITH the port, and the other
+# finds CDP already up and merely re-injects -- every step on that path is
+# idempotent (proven by test-reapply-idempotent).
+#
+# launch-and-skin.mjs re-checks this value on every run (see ensureAutostart),
+# so a wiped or reverted entry is repaired the next time the launcher runs
+# rather than waiting for the user to find this script again.
+$OurRunName = 'AnonBuddySkin.' + [IO.Path]::GetFileNameWithoutExtension($WorkBuddyExe)
+$RunKeyHkcu = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$ourExisting = $null
+try {
+  $ourExisting = (Get-ItemProperty -Path $RunKeyHkcu -Name $OurRunName -ErrorAction Stop).$OurRunName
+} catch {
+  $ourExisting = $null
+}
+$ourOriginal = if ($null -eq $ourExisting) { '' } else { [string]$ourExisting }
+$ourEntry = [pscustomobject]@{
+  Kind   = 'RunKeyNew'
+  Where  = "$RunKeyHkcu\$OurRunName"
+  Target = $WScript
+  Args   = $ourOriginal
+}
+
+if ([string]$ourExisting -ne $newValue) {
+  Set-ItemProperty -Path $RunKeyHkcu -Name $OurRunName -Value $newValue -ErrorAction Stop
+  $changed.Add($ourEntry)
+  if ($null -eq $ourExisting) {
+    Write-Host "  added our own autostart value: Run\$OurRunName"
+  } else {
+    Write-Host "  repaired our own autostart value: Run\$OurRunName"
+  }
+} else {
+  Write-Host "  our own autostart value already correct: Run\$OurRunName"
+}
+Write-Host ""
 
 foreach ($entry in $entries) {
   # Only skip entries already bound **in the current argument format**. An entry
@@ -331,11 +394,18 @@ foreach ($entry in $entries) {
   }
 }
 
-if ($changed.Count -gt 0) {
-  Write-StateFile -Entries $entries -Exe $WorkBuddyExe -P $Port
+$stateEntries = @($entries)
+if ($ourEntry) { $stateEntries = $stateEntries + @($ourEntry) }
+
+if ($changed.Count -gt 0 -or -not (Test-Path -LiteralPath $StatePath)) {
+  Write-StateFile -Entries $stateEntries -Exe $WorkBuddyExe -P $Port
   Write-Host ""
-  Write-Host "Done. $($changed.Count) entry/entries now start WorkBuddy through the silent launcher."
+  Write-Host "Done. $($changed.Count) change(s) applied; WorkBuddy now starts through the silent launcher."
   Write-Host "Backups and rollback info: $StateDir"
+  Write-Host ""
+  Write-Host "Autostart no longer depends on WorkBuddy's own Run value. The app rewrites that"
+  Write-Host "one back to the bare exe on every launch, so this script installs a separate"
+  Write-Host "value of its own, which the app never sees and therefore never reverts."
   Write-Host ""
   Write-Host "If WorkBuddy is running right now, quit it from the tray and start it again"
   Write-Host "through the shortcut; the skin will be there from the first second."

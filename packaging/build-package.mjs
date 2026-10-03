@@ -102,7 +102,48 @@ if errorlevel 1 (
   echo     powershell -File scripts\\setup-autoskin.ps1 -Undo
 )
 echo.
+echo   下次想让启动过程完全安静（不闪这个黑框），双击 一键换肤.vbs。
+echo.
 pause
+`;
+
+// 一键换肤.bat 的静默孪生兄弟。
+// .bat 必须留着 —— 它带完整说明和 pause，正是首次安装或出问题时需要的东西；
+// 但双击 .bat 必然闪一次控制台，这是 .bat 的固有属性。这个文件存在的意义是：
+// 日常使用（以及被绑定的桌面图标）完全不出窗口。
+const LAUNCH_VBS = `' AnonBuddy Skin - silent entry point.
+'
+' Double-click this file instead of the .bat when you would rather not see a
+' console window. It does the same thing: start WorkBuddy with the CDP port open,
+' wait for the renderer, inject the skin, then wire the desktop icon, Start Menu
+' entry and autostart value to this same flow.
+'
+' The .bat file is still shipped on purpose: it prints the full explanation and
+' pauses at the end, which is what you want the first time around, or when
+' something goes wrong.
+'
+' Keep this file ASCII-only.
+
+Option Explicit
+
+Dim shell, fso, here, target, cmd
+
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+here = fso.GetParentFolderName(WScript.ScriptFullName)
+target = fso.BuildPath(here, "scripts\\autoskin-launch.vbs")
+
+If Not fso.FileExists(target) Then
+  MsgBox "scripts\\autoskin-launch.vbs is missing next to this launcher:" & vbCrLf & target, _
+         16, "AnonBuddy Skin"
+  WScript.Quit 1
+End If
+
+cmd = """" & target & """ --prefer {edition} --port {port} --theme last --timeout 300 --setup"
+
+' 0 = hidden window, False = do not wait for it to finish.
+shell.Run cmd, 0, False
 `;
 
 const RESTORE_BAT = `@echo off
@@ -279,6 +320,7 @@ function build(edition, version, keepStage) {
 
   const vars = { edition, exe: cfg.exe, port: cfg.port, label: cfg.label, site: cfg.site };
   writeFileSync(join(stage, "一键换肤.bat"), crlf(fill(LAUNCH_BAT, vars)), "utf8");
+  writeFileSync(join(stage, "一键换肤.vbs"), crlf(fill(LAUNCH_VBS, vars)), "utf8");
   writeFileSync(join(stage, "一键还原.bat"), crlf(RESTORE_BAT), "utf8");
   writeFileSync(join(stage, "使用说明.txt"), crlf(fill(README_TXT, vars)), "utf8");
 

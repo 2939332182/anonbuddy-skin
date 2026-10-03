@@ -110,6 +110,28 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 
 ## 维护史
 
+**2026-10-04（1.0.6，待发布）** —— 三项请求：启动零黑框、外观重构、检查更新。
+
+- **启动链路彻底零窗口。** 黑框的真凶是 `autoskin-launch.vbs` 里的
+  `WScript.Shell.Exec("cmd /c where node.exe 2>nul")` —— `Exec` 会**真的创建一个可见的控制台**，
+  而这条路径开机时也会走。改用 `FileSystemObject` 逐段走 `%PATH%` 之后，
+  用 `IsWindowVisible` 枚举 `ConsoleWindowClass` 实测：旧版必闪一个，新版**零可见控制台窗口**。
+- **去掉开机路径上的 PowerShell。** `launch-and-skin.mjs` 判断"守护是否在跑"原本要起一个
+  `powershell.exe` 去枚举所有 node 进程；改成守护自己写 `guard-<port>.pid`、启动器读它并用
+  `tasklist` 验活（带 windowsHide），开机路径上不再有第二个解释器。
+- **开机自启不再和 WorkBuddy 抢同一个 Run 值。** 它每次启动都会把**自己**的 Run 值写回裸 exe
+  （Electron `setLoginItemSettings`），所以绑它必然回滚。现在每个产品线各有自己的
+  `AnonBuddySkin.<exe>` 值，并在每次启动流程末尾自愈一次（`ensureAutostart`）。
+  两条值都指向静默启动器之后，**开机顺序不再影响结果**。
+- **外观系统 v2**：两个滑块 → 六个，分「壁纸」（壁纸模糊 / 磨砂遮罩）与「液态玻璃」
+  （玻璃模糊 / 通透 / 顶部高光 / 边缘描边）两组。新增磨砂遮罩层与 iOS 液态玻璃配方
+  （三条 inset 阴影 + 白釉渐变 + `saturate`），配方与取值区间取自 dsh-wallpaper-engine
+  （MIT）的实测口径。旧键 `sidebarBlur` 自动迁移为 `glassBlur`。
+- **修掉音乐播放的三个 bug**（见坑章节最后一条）。
+- **设置面板底部加「插件更新」**：查 GitHub 最新 Release（404 时退回 tags）、三段式版本比较、
+  已是最新版时按钮走一次回弹动画并转绿，另附可点击的项目地址。
+  分组名刻意叫「插件更新」而不是「关于」—— 左侧原生导航**已经有一个「关于」**，重名会混淆。
+
 **2026-10-03（v1.0.5）**
 
 - **场景壁纸从「静帧」升级成「真渲染」** —— 接上 WebWallGL 1.4.2（随包 vendored 在 `vendor/webwallgl/`，运行时按需 `<script src>` 加载，不内联进注入 payload）：静态 4K 贴图先铺 → 后台解析 pkg → 首帧就绪后 450ms 淡入顶替；四级降级链（实时渲染 → 静态 4K → 工坊预览图 → 主题取色渐变）保证**任何情况下都不是黑屏**
@@ -187,6 +209,36 @@ WebWallGL 的 `mount()` 只在**首帧画出来之后**才 resolve，而窗口�
 **教训：兜底逻辑要注册在它真正负责的那条分支里**（这里是 `catch` 的超时分支），
 不要挂在共享路径上。另外，`we.waitReady()` 那种"只判断存在实例"的等待是**不可靠的**
 （上一个实例还没释放时就返回 true），实测脚本要等的是"实例的条目 id 等于目标"。
+
+**`WScript.Shell.Exec` 会创建一个可见的控制台窗口（2026-10-04）。**
+`autoskin-launch.vbs` 里那句 `shell.Exec("cmd /c where node.exe 2>nul")` 每次运行都闪一个黑框 ——
+而这条 vbs 在**开机时也会走**，正是用户报的"每次开机都有黑框"。
+`Exec` 与 `Run` 不一样：`Run(cmd, 0, False)` 的 `0` 是 SW_HIDE，`Exec` 没有这个参数，它就是把
+子进程的控制台显示出来。所以 vbs 里**不许出现 Exec / cmd / powershell**，查 PATH 用
+`FileSystemObject` 逐段 `FileExists` 即可（实测能正确解析出 `D:\Apps\nodejs\node.exe`）。
+验证手法：`EnumWindows` + `IsWindowVisible` + `GetClassName`，统计 `ConsoleWindowClass`
+窗口 —— 旧版运行期间必现一个，新版为零（进程计数做不到这件事，node 本来就会建一个**隐藏**控制台）。
+
+**绑别人的 Run 值是白费力气（2026-10-04）。**
+WorkBuddy 每次启动都会把它**自己**的 Run 值写回裸 exe（Electron `setLoginItemSettings` 的行为），
+所以往那个值上绑静默启动器必然被回滚。判据不需要重启验证：`autoskin-setup.json` 还在
+（说明 `-Undo` 从没跑过 —— 跑了会删掉这个文件），而注册表里的 Run 值已经是裸 exe，
+中间只可能是应用自己改过。解法是**用我们自己的值名**（`AnonBuddySkin.<exe>`，每产品线一条，
+名字带版本区分，否则两个版本会互相覆盖），并在每次启动末尾复查自愈一次。
+
+**`HKCU\...\Run` 的执行顺序不是字母序（2026-10-04）。**
+原本想靠 `AnonBuddySkin` 排在 `WorkBuddy.*` 之前抢跑，实测 `reg query` 返回的顺序是
+Steam / Mem Reduct / Free Download Manager / WorkBuddy.* —— 这个假设不成立。
+真正让顺序无关的做法是**两条 Run 值都指向同一个静默启动器**：谁先执行都带端口启动，
+后执行的那个只会发现 CDP 已就绪、重新注入一次，而整条路径是幂等的。
+
+**暂停不要把音量写死成 0（2026-10-04）。**
+`setWePaused` 原本调 `setWeVolume(0, { fromPause: true })`，于是 `weVolume` 连同
+localStorage 一起被改成 0 —— 症状是"暂停一下再继续，声音就没了，得重新拖一次音量"，
+而且重启之后依然是静音。音量应当是**派生**的：
+`effectiveVolume() = 静音开关开着且未暂停 ? weVolume : 0`，`weVolume` 永远保留用户那一次设定。
+同一个坑的另一半：`setWeSound` 必须同时调 `syncWwglVolume()` —— scene 壁纸没有 `<video>`，
+它的声音只走 WebGL 实例的 `setVolume`，漏掉这一行的症状是"打开声音开关，scene 壁纸照样无声"。
 
 ## 已知限制与待办
 

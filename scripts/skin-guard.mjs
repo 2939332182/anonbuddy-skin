@@ -14,7 +14,8 @@
 //
 // 退出: 收到 SIGINT/SIGTERM，或应用关掉之后连续重连失败达到上限。
 
-import { appendFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { defaults, prepareApply } from "../src/cli.mjs";
@@ -26,7 +27,8 @@ import { SkinGuard } from "../src/skin-guard.mjs";
 // 出问题时没有任何现场可看。所以自己落一份日志：前台跑时照样打印，
 // 后台跑时至少能在 %LOCALAPPDATA%\AnonBuddySkin\guard.log 里翻。
 // 超过 1MB 就从头写，避免无限增长（这是个滚动日志，不是审计日志）。
-const LOG_PATH = resolveStudioPaths().logPath;
+const STUDIO_PATHS = resolveStudioPaths();
+const LOG_PATH = STUDIO_PATHS.logPath;
 const LOG_MAX_BYTES = 1024 * 1024;
 
 function log(message) {
@@ -67,6 +69,26 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  // 把自己的 pid 记到一个按端口命名的文件里。启动器读它就能回答
+  // "这个端口的守护已经在跑了吗"，不必再起一个 PowerShell 去枚举进程
+  // —— 那是开机路径上唯一的多余动作，也是用户看得见的那个 powershell。
+  // 读法见 scripts/launch-and-skin.mjs 的 liveGuardPid()。
+  const pidPath = join(STUDIO_PATHS.stateRoot, `guard-${args.port}.pid`);
+  try {
+    writeFileSync(pidPath, String(process.pid), "utf8");
+  } catch {
+    /* 记不下来不影响守护本身，最坏是启动器下次多起一个（幂等） */
+  }
+  const clearPid = () => {
+    try {
+      rmSync(pidPath, { force: true });
+    } catch {
+      /* 忽略：残留的 pid 文件会被启动器按"pid 已死"清掉 */
+    }
+  };
+  process.on("exit", clearPid);
+
   const deps = defaults({});
   const prepared = await prepareApply({
     roots: [deps.bundledThemesRoot, deps.userThemesRoot],
