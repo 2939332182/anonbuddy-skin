@@ -110,7 +110,7 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 
 ## 维护史
 
-**2026-10-04（1.0.6，待发布）** —— 三项请求：启动零黑框、外观重构、检查更新。
+**2026-10-04（v1.0.6）** —— 三项请求：启动零黑框、外观重构、检查更新。
 
 - **启动链路彻底零窗口。** 黑框的真凶是 `autoskin-launch.vbs` 里的
   `WScript.Shell.Exec("cmd /c where node.exe 2>nul")` —— `Exec` 会**真的创建一个可见的控制台**，
@@ -346,6 +346,7 @@ localStorage 残留状态互相污染** —— 基线那次就因为继承了上
 
 | tag | 附件 |
 |:---|:---|
+| v1.0.6 | `chihayaanon-skin-1.0.6-cn.zip` / `-intl.zip`（零黑框启动 + 外观系统 v2 + 设置内检查更新） |
 | v1.0.5 | `chihayaanon-skin-1.0.5-cn.zip` / `-intl.zip`（场景壁纸真渲染 + 四级降级链） |
 | v1.0.4 | `chihayaanon-skin-1.0.4-cn.zip` / `-intl.zip`（一键换肤顺手接好启动入口，用户零额外步骤） |
 | v1.0.3 | `chihayaanon-skin-1.0.3-cn.zip` / `-intl.zip`（事件驱动首屏注入 + 状态文档 + 换肤事务） |

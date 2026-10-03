@@ -52,7 +52,20 @@ const list = (name) => {
 
 const REPO = value("--repo", "2939332182/anonbuddy-skin");
 const BRANCH = value("--branch", "main");
-const BASE_SHA = value("--base-sha");
+/**
+ * 短 sha 会在 `/git/commits/{sha}` 上 404（那个端点要完整 40 位），而手抄一长串又容易错。
+ * 本地有该对象就自动展开成完整 sha；本地没有（例如远端刚被人推了新提交、还没 fetch）
+ * 就原样返回 —— 让后面的"父提交核对"去报错，而不是在这里悄悄改掉用户的意思。
+ */
+function expandSha(rev) {
+  if (!rev) return rev;
+  try {
+    return execFileSync("git", ["rev-parse", rev + "^{commit}"], { cwd: process.cwd(), encoding: "utf8" }).trim();
+  } catch {
+    return rev;
+  }
+}
+const BASE_SHA = expandSha(value("--base-sha"));
 const DIFF_BASE = value("--diff-base");
 const TAG = value("--tag");
 const NOTES_FILE = value("--notes-file");
