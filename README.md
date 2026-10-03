@@ -4,7 +4,7 @@
 
 # AnonBuddy Skin
 
-**让你的 WorkBuddy 跑起 Wallpaper Engine 的场景壁纸 —— 真的在跑。**
+**让你的 WorkBuddy 跑起 Wallpaper Engine 的场景壁纸**
 
 粒子在飘、模型在动、鼠标带着视差、作者写的脚本在运算、场景自带的音频在响。不是截一张图糊在背景上，是本机实时渲染。
 
