@@ -1,6 +1,7 @@
 # 项目记忆 · AnonBuddy Skin
 
-> 给接手维护的人或 AI 看。截至 commit `ee9a6b0` / v1.0.4（2026-09-29）。
+> 给接手维护的人或 AI 看。这份是**长期记忆**（规矩、坑、待办）；某一轮的完整过程记录
+> —— 起因 / 处理 / 验证证据 / 遗留 —— 见 [TASK-MEMORY-1.0.6.md](TASK-MEMORY-1.0.6.md)。
 > 更早的历史文档在 `docs/HANDOFF.md`、`docs/HANDOVER-FOR-AGENT.md`、`docs/ARCHITECTURE.md` —— 那些描述的是重构前的形态，读的时候注意时效。
 
 ## 这是什么
@@ -294,6 +295,20 @@ localStorage 一起被改成 0 —— 症状是"暂停一下再继续，声音�
 脚本在 `outputs/make-preview-gif.mjs`（gitignored，不算 `scripts/` 的注册表）。
 **它值得长期留用**：以后要再出演示图，把它移进 `scripts/` 并同步更新 `test-scripts-registry.mjs`
 的脚本计数即可。
+
+**`--normalize-eol` 是全局开关，会把二进制文件毁掉（2026-10-04）。**
+`publish-via-api.mjs` 用它把工作区的 CRLF 压成 LF（这台机器 `core.autocrlf=true`，不归一化就会
+把远端文件的行尾改掉），但它对**每一个**待推文件都跑一遍 `toString("utf8").replace(/\r\n/g,"\n")`
+再编码回去。把 `docs/images/preview-scene.gif` 送进去之后：非法字节变成 U+FFFD、体积还会膨胀 ——
+**1,411,132 字节被推成 2,465,231 字节**，GitHub 上那张演示图再也渲染不出来（推送日志里那个
+字节数就是证据，当时没看出来，是用户报了"看不到 GIF"才回头查的）。
+现在按扩展名识别二进制（`png/jpg/gif/webp/avif/ico/bmp/zip/7z/gz/exe/dll/pkg/mp4/webm/mp3/
+woff2/ttf/asar/node/wasm`）并原样推送。**凡是"归一化 / 转码 / 重编码"的开关，先问一句"这文件是文本吗"。**
+
+**`/git/commits/{sha}` 要完整 40 位 sha（2026-10-04）。**
+用短 sha（`2bafd08`、`f8ac106`）调它一律 404，而 `git rev-parse --short` 的输出恰好是短的 ——
+很容易直接粘过去，两次发布都踩了。已给 `publish-via-api.mjs` 加 `expandSha()`：本地有该对象就
+自动展开成完整 sha，没有则原样返回、让后面的"父提交核对"去报错，而不是在这里静默改掉用户的意思。
 
 ## 已知限制与待办
 
