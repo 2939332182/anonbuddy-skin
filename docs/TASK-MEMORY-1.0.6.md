@@ -103,7 +103,7 @@ Release id `402653654`，`draft: false`，说明已 PATCH（body 1379 字符）�
 
 | # | 遗留 | 状态 | 结果 |
 |:--|:---|:---|:---|
-| 1 | 本地 / 远端历史结构不同 | ⚠️ 未完成 | `git fetch` 先后被 RST 两次、最后一次完全连不上（`Failed to connect to github.com:443 after 21081 ms`）。**内容**可通过 API 对齐，**历史结构**只能等网络。恢复后：`git fetch origin --tags --force`，先比 `git rev-parse HEAD^{tree}` 与远端 tree，一致再 `git reset --hard origin/main`。 |
+| 1 | 本地 / 远端历史结构不同 | ✅ 已完成（2026-10-06 新窗口） | `git fetch` 重试一次即通；比对时发现远端 tree 多两个被 `--normalize-eol` 毁掉的 `dist/*.zip`（`93773d0` 带入），故**没有**直接 reset。先用 Git Data API 建「只删 dist」的 tree（返回 sha 与本地 `HEAD^{tree}` 完全相同），提交 `e1b14048` 更新 main，再 fetch → 比 tree → `git reset --hard origin/main`。详见下方「2026-10-06 对齐」。 |
 | 2 | tag `v1.0.6` 落后于 main | ✅ 已处理 | 用 API `PATCH /git/refs/tags/v1.0.6`（`force:true`）移到当前 main 头。 |
 | 3 | 一键更新未端到端验证 | ✅ 已完成 | 造临时目录模拟 1.0.5 安装，真实走完「查最新 → 下载 → 校验 → 解包 → 覆盖」：`{"ok":true,"stage":"done","from":"1.0.5","to":"1.0.6","applied":true,"written":62,"skipped":0}`，7 项检查全 PASS（含引擎 950,112 字节一致）。 |
 | 4 | UI 重构未做页签制 | ❌ 未做 | 理由见下。 |
@@ -142,9 +142,9 @@ Release id `402653654`，`draft: false`，说明已 PATCH（body 1379 字符）�
 
 | 项 | 值 |
 |:---|:---|
-| 远端 main | `95145bb8d94ebfe33444e1b03344f6abe7f79d25` |
-| tag `v1.0.6` | `95145bb8d94ebfe33444e1b03344f6abe7f79d25`（**与 main 相同**） |
-| 收尾提交 | 本地 `b7d7e55`（内容）→ 远端 `95145bb`（API 生成），两者 tree 相同、历史结构不同 |
+| 远端 main | `e1b14048a0640f3d49e34175cda9375de9099ab2` |
+| tag `v1.0.6` | `e1b14048a0640f3d49e34175cda9375de9099ab2`（**与 main 相同**） |
+| 收尾提交 | 本地 `2d22137`（tree `49db104c`）→ 远端 `e1b14048`（API 生成），**同一个 tree，历史结构已对齐** |
 | Release | `v1.0.6`，id `402653654`，`draft: false` |
 | 附件 | `chihayaanon-skin-1.0.6-cn.zip` = 3,130,473 字节；`-intl.zip` = 3,130,723 字节 |
 | 附件校验 | 与本地构建 SHA256 一致（cn `F42037458D7F2604…`、intl `6DD11BFA524AAE63…`） |
@@ -159,3 +159,26 @@ Release id `402653654`，`draft: false`，说明已 PATCH（body 1379 字符）�
 
 这条正好印证了 PROJECT-MEMORY 里已有的那条教训：**每次推送前先确认远端头，别假设它还是你上次推的
 那个**。当时本地以为远端是 `c20c212`，而实际已经是 `59b2d767`。
+
+### 2026-10-06 对齐（本轮之后）
+
+新窗口按 PROJECT-MEMORY 的判据执行了那次「等网络恢复再做」的收尾：
+
+```
+git fetch origin --tags --force           # 首次 Recv failure: Connection was reset，重试一次即通
+HEAD^{tree}      = 49db104ce0be…          # 本地
+origin/main tree = be559cb8ddd7…          # 不一致
+only_local  = （空）
+sha_diff    = （空：137 个共有文件 blob sha 全同）
+only_remote = dist/chihayaanon-skin-1.0.6-cn.zip   (5,699,940 B)
+              dist/chihayaanon-skin-1.0.6-intl.zip (5,700,233 B)
+```
+
+不一致的原因不是内容分叉，而是远端多带了 `93773d0` 误推、且被 `--normalize-eol` 毁掉的两个 zip
+（`src/zip-read.mjs` 对它们直接抛「中央目录偏移越界」；本地同名产物 3,130,473 / 3,130,723 字节完好，
+62 条目、prefix 正确）。所以**没有**直接 reset：先用 Git Data API 建「只删 dist」的 tree，
+返回的 sha 恰是本地 `HEAD^{tree}`，据此建提交 `e1b14048` 并 `force:false` 快进 main，
+再 fetch、比 tree、`git reset --hard origin/main`。tag `v1.0.6` 同步移到 `e1b14048`。
+
+结果：`HEAD == origin/main == e1b14048`，两边 tree 都是 `49db104c`，`git status -sb` 不再显示 ahead。
+远端 main 在那之前已从 `95145bb` 前进到 `81ca0096`（只改本文件 +3/−2）—— 又一例「远端头会自己往前走」。

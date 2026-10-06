@@ -9,7 +9,7 @@
 给 WorkBuddy 桌面端（腾讯的 AI 办公客户端）换肤的工具。原理：用 `--remote-debugging-port` 把 WorkBuddy 拉起来，通过本机 CDP 连上它的渲染进程，注入一份 CSS 和一段脚本。**不改 `app.asar`、不改安装目录、不改签名**，效果只活在渲染进程里，进程一换就没了。
 
 仓库：https://github.com/2939332182/anonbuddy-skin
-当前版本：**1.0.4**，工作区在 `D:\workbuddy-skin-studio`
+当前版本：**1.0.6**，工作区在 `D:\workbuddy-skin-studio`
 
 ## 先记住这几条硬约束
 
@@ -110,6 +110,19 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 ```
 
 ## 维护史
+
+**2026-10-06（对齐与清理）** —— 把本地 / 远端的**历史结构**终于对齐，顺手清掉仓库里的坏二进制。
+
+- 远端 main 已从 `95145bb` 前进到 `81ca0096`（只改 `docs/TASK-MEMORY-1.0.6.md` +3/−2），当时没人注意 ——
+  又踩了那条「每次推送前先确认远端头，别假设它还是你上次推的那个」。
+- 对齐时发现远端 tree 比本地多两个文件：`dist/*.zip`，由 `93773d0` 引入，且是被 `--normalize-eol`
+  毁过的版本（见坑章节末条）。处理方式：Git Data API 建「只删 dist」的 tree，返回的 sha 与本地
+  `HEAD^{tree}` **完全相同** —— 等于服务端替我们证明了「删完两边内容同构」→ 提交 `e1b14048` →
+  `force:false` 更新 main → fetch → **先比 tree 再** `git reset --hard origin/main`。
+  工作区零改动，`dist/` 里完好的本地产物没被碰。
+- tag `v1.0.6` 同步移到 `e1b14048`。
+- 顺带一条可用结论：`git fetch` 首次报 `Recv failure: Connection was reset`，**立刻重试即通**。
+  这和 10-03「六个代理端口全灭、只有 API 通」不是同一种故障 —— 先重试两三次，再谈换路或走 API。
 
 **2026-10-04（v1.0.6）** —— 三项请求：启动零黑框、外观重构、检查更新。
 
@@ -309,6 +322,20 @@ woff2/ttf/asar/node/wasm`）并原样推送。**凡是"归一化 / 转码 / 重�
 用短 sha（`2bafd08`、`f8ac106`）调它一律 404，而 `git rev-parse --short` 的输出恰好是短的 ——
 很容易直接粘过去，两次发布都踩了。已给 `publish-via-api.mjs` 加 `expandSha()`：本地有该对象就
 自动展开成完整 sha，没有则原样返回、让后面的"父提交核对"去报错，而不是在这里静默改掉用户的意思。
+
+**误推的打包产物会在仓库里躺很久，而且躺的还是被 `--normalize-eol` 毁过的那一份（2026-10-06 清出来的）。**
+远端 `93773d0`（2026-10-03 第三次 API 推送）把 `dist/chihayaanon-skin-1.0.6-{cn,intl}.zip` 一起提交了 ——
+那时脚本还没有 `BINARY_EXT` 保护（`c20c212` 次日才加），于是两个包各膨胀 1.82×：
+3,130,473 → 5,699,940、3,130,723 → 5,700,233 字节，各带约 130 万个 `U+FFFD`，
+`src/zip-read.mjs` 解析直接抛「中央目录偏移越界」。`dist/` 在 `.gitignore:52` 里，本不该有这条路；
+而脚本的清单来源是 `git diff --diff-filter=ACMR`，ignored 的 `dist/` 不会从那里进来 ——
+那次是**显式文件清单**把它带上去的。所以除了盯「归一化开关」，还要盯**清单里有没有不该在的东西**。
+
+清理走 Git Trees API：`base_tree` 给远端头 tree，条目给
+`{path, mode:"100644", type:"blob", sha:null}` —— **`mode` 和 `type` 必须一起给**，
+只给 `path` + `sha:null` 会被 422 顶回（`Must supply a valid tree.mode`）。建完先读返回的 tree sha：
+**等于本地 `HEAD^{tree}` 就是「删完两边同构」的服务端证明**，这时才建 commit、`force:false` 更新 ref。
+提交 `e1b14048`，远端 tree 回到 `49db104c`。
 
 ## 已知限制与待办
 
