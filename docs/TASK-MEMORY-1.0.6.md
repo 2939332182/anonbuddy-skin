@@ -142,8 +142,8 @@ Release id `402653654`，`draft: false`，说明已 PATCH（body 1379 字符）�
 
 | 项 | 值 |
 |:---|:---|
-| 远端 main | `e1b14048a0640f3d49e34175cda9375de9099ab2` |
-| tag `v1.0.6` | `e1b14048a0640f3d49e34175cda9375de9099ab2`（**与 main 相同**） |
+| 远端 main | 与本文件同一提交（2026-10-06 的对齐提交 = `e1b14048a0640f3d49e34175cda9375de9099ab2`，tree `49db104c`） |
+| tag `v1.0.6` | `e1b14048a0640f3d49e34175cda9375de9099ab2`（对齐提交；其后的文档提交不移动 tag） |
 | 收尾提交 | 本地 `2d22137`（tree `49db104c`）→ 远端 `e1b14048`（API 生成），**同一个 tree，历史结构已对齐** |
 | Release | `v1.0.6`，id `402653654`，`draft: false` |
 | 附件 | `chihayaanon-skin-1.0.6-cn.zip` = 3,130,473 字节；`-intl.zip` = 3,130,723 字节 |
@@ -182,3 +182,7 @@ only_remote = dist/chihayaanon-skin-1.0.6-cn.zip   (5,699,940 B)
 
 结果：`HEAD == origin/main == e1b14048`，两边 tree 都是 `49db104c`，`git status -sb` 不再显示 ahead。
 远端 main 在那之前已从 `95145bb` 前进到 `81ca0096`（只改本文件 +3/−2）—— 又一例「远端头会自己往前走」。
+
+此后 main 还会被文档提交继续往前推（本记录本身就是一次）。**tag 停在 `e1b14048` 不动**；
+复核「本地与远端是否同构」要比 `HEAD^{tree}` 与**当时的** `origin/main^{tree}`，
+别把 `49db104c` 当成永久基准 —— 它只对 `e1b14048` 那一个提交成立。
