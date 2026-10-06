@@ -142,8 +142,9 @@ Release id `402653654`，`draft: false`，说明已 PATCH（body 1379 字符）�
 
 | 项 | 值 |
 |:---|:---|
-| 远端 main | `59b2d76781443464664c2469c533886f031f69a9`（含网页提交 `59b2d76`，见下） |
-| tag `v1.0.6` | 见文末收尾记录 |
+| 远端 main | `95145bb8d94ebfe33444e1b03344f6abe7f79d25` |
+| tag `v1.0.6` | `95145bb8d94ebfe33444e1b03344f6abe7f79d25`（**与 main 相同**） |
+| 收尾提交 | 本地 `b7d7e55`（内容）→ 远端 `95145bb`（API 生成），两者 tree 相同、历史结构不同 |
 | Release | `v1.0.6`，id `402653654`，`draft: false` |
 | 附件 | `chihayaanon-skin-1.0.6-cn.zip` = 3,130,473 字节；`-intl.zip` = 3,130,723 字节 |
 | 附件校验 | 与本地构建 SHA256 一致（cn `F42037458D7F2604…`、intl `6DD11BFA524AAE63…`） |
