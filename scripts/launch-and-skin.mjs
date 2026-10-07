@@ -105,7 +105,7 @@ async function main() {
   --no-watch         不启动补注入进程
   --no-restart       发现裸启动实例时直接报错，不等用户
   --setup            顺便把桌面图标/开始菜单/开机自启接到静默启动器上（包内 bat 默认带这个）
-  --no-setup         不做上面那件事，只注入这一次
+  --no-setup         不做上面那件事、也不动开机自启值（默认行为，平时双击图标走这条）
   --help             显示本帮助`);
     return;
   }
@@ -273,13 +273,20 @@ async function main() {
     }
   }
 
-  // --- 6. 自愈开机自启值 ----------------------------------------------------
-  // 刻意放在最后：此刻 WorkBuddy 已经启动完成，它对自己 Run 值的那一次重写也已经落地，
-  // 所以这次写入能盖住它。详见 ensureAutostart 的注释。
-  const repaired = ensureAutostart(exe, port);
-  if (repaired > 0) {
-    console.log("");
-    console.log(`开机自启项已修复 ${repaired} 处 —— WorkBuddy 会把自己的 Run 值改回裸 exe，这里补回静默启动器。`);
+  // --- 6. 开机自启值：只在 --setup 时维护 ------------------------------------
+  // 默认**不碰** Run 值。皮肤只需要"用户打开应用的那一刻"生效，而开机自启会额外把
+  // 两个版本一起拉起来 —— 更糟的是多点一次桌面图标就把自启项写回来，用户看到的就是
+  // "怎么又自己弹出来了"。所以这一步改成显式开关：包内「一键换肤.bat」带 --setup 时
+  // 仍然接好自启（新用户一次到位），日常双击图标则原样保留注册表现状。
+  //
+  // 时机仍然放在最后：此刻 WorkBuddy 已经启动完成、它对自己 Run 值的那次重写也已经
+  // 落地，所以这一次写入能盖住它。详见 ensureAutostart 的注释。
+  if (args.setup) {
+    const repaired = ensureAutostart(exe, port);
+    if (repaired > 0) {
+      console.log("");
+      console.log(`开机自启项已修复 ${repaired} 处 —— WorkBuddy 会把自己的 Run 值改回裸 exe，这里补回静默启动器。`);
+    }
   }
 }
 
