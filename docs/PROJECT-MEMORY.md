@@ -111,6 +111,18 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 
 ## 维护史
 
+**2026-11-12（1.0.7：检查更新修复 + 5.9.4 兼容）** —— 例行维护，结果修掉三个真缺陷。
+
+- 起点：国际版已从 5.6.2 跃到 **5.9.4**（2026-10-29），国内版仍 5.6.2；仓库 HEAD 与远端同为 `e2603ca`。
+- **真缺陷 1：检查更新必然失败。** GitHub API 未鉴权只有 60 次/小时，实测 `403 API rate limit exceeded for 118.254.23.161`，而 `runSelfUpdate` 把 403 翻译成「可能被墙或仓库没有 Release」。改走 `releases/latest` 的 302 跳转 + `expanded_assets` 的 HTML（零 API 配额），API 仅作兜底。
+- **真缺陷 2：国际版会被装成国内包。** `detectEdition()` 只看目录名含不含 `-cn`/`-intl`，而实际运行根叫 `workbuddy-skin-studio` → 返回空 → 取 `zips[0]`，而资产里 cn 排前面。加 `EDITION_BY_PORT = { 9333: "intl", 9334: "cn" }` 兜底。
+- **真缺陷 3：覆盖更新无回滚。** `installFromZip()` 加 `backupDir`：写之前把将被覆盖的文件复制到 `update-backup-<时间戳>`，结果里报 `backedUp`。
+- **5.9.4 兼容**：注入、主题切换、右键菜单、逐字动画、悬浮按钮全部正常（`check-skin` 报 CSS 32047 字符、5 条规则全 true）。同时新增主窗口优先排序（见坑章节）。
+- **测试套件**：8 PASS / 12 FAIL → **14 PASS / 6 SKIP / 0 FAIL**。12 个 FAIL 没有一个是真的皮肤回归，全是文案过期（助理Beta / 定时任务 / 设为开机默认主题）与窗口遮挡（见坑章节）。另修掉「跑测试污染用户配置」：实测堆出 9 个「测试新图」共 283KB，并把开机默认主题改成测试临时生成的主题 —— 这是「重启后皮肤不对」的真凶。现在每个用例前后快照并还原 localStorage 与 `state.json`。
+- 发布：`7cc6b0c`（产品修复）、`2aac20f`（测试）、`9995a83` → 远端 `fbe7d5d`（发布脚本修正，tree 同为 `6cdc74e`）；tag `v1.0.7` 指向 `2aac20f`；Release 两包 cn 3,133,535 B / intl 3,133,785 B。
+- 端到端验证：拿一个 `version: 1.0.6` 的临时 root → `{"stage":"available","from":"1.0.6","to":"1.0.7","asset":"chihayaanon-skin-1.0.7-intl.zip"}` → 直连超时、`ghproxy.net` 也超时 → `gh-proxy.com` 成功 → 62 文件写入、备份 1 个、`package.json` 变 1.0.7。镜像降级链也顺带验证了。
+- 两侧守护重启到 1.0.7：`/status` 分别返回 `edition:"intl"`（9333）与 `edition:"cn"`（9334）。
+
 **2026-10-06（对齐与清理）** —— 把本地 / 远端的**历史结构**终于对齐，顺手清掉仓库里的坏二进制。
 
 - 远端 main 已从 `95145bb` 前进到 `81ca0096`（只改 `docs/TASK-MEMORY-1.0.6.md` +3/−2），当时没人注意 ——
@@ -213,6 +225,12 @@ node scripts/sync-webwallgl.mjs --check                    # 校验 vendored 副
 **`Target.attachedToTarget` 的 `sessionId` 在 `params` 里**，不在消息顶层。顶层那个 `sessionId` 只有"子会话发出的事件"（如 `Runtime.bindingCalled`）才有。分不清这两者会写出永远拿不到 sessionId 的代码，症状是"事件收到了但什么都没发生"。
 
 **`requestAnimationFrame` 在页面不可见时完全不执行。** 窗口最小化或收进托盘时 rAF 一个回调都不来（实测 300ms 内零回调，`Page.bringToFront` 也唤不回最小化的窗口）。`08-copy-typewriter.js` 的 `scheduleCopy` 一度把"重置标志位"写在 rAF 回调里，于是第一次排队的回调不来、`copyScheduled` 永久卡在 true，之后所有自动修复全被它挡掉 —— 表现是切页之后标题再也不变回来。现在 rAF / `setTimeout` / `queueMicrotask` 三路兜底（microtask 不受可见性影响，隐藏场景靠它）。连带影响：`test-roll-anim.mjs` 靠逐帧采样，窗口不可见时采不到帧，现在会明确 SKIP 并提示切到前台，而不是报一个误导性的 FAIL。
+
+**窗口被别的窗口盖住时，`Input.dispatchMouseEvent` 会精确卡满 5 秒。** 与上一条同源但表现不同：`mouseMoved` 实测 5019ms（超时设 5000ms），把窗口提到前后同一次调用只要 **10ms**；`Runtime.evaluate`（2ms）、`Page.bringToFront`（10ms）、`dispatchKeyEvent`（116ms）全都不受影响，只有鼠标类事件中招 —— 所以看起来像"鼠标相关的测试坏了"，实际是环境。判定顺序：先读 `document.visibilityState`，hidden 就别怀疑代码。唤醒用 `scripts/ensure-window-awake.mjs`（走 `WScript.Shell.AppActivate`；**它的返回值不可靠**，标题不完全匹配时返回 False 但窗口照样被激活），`run-tests.mjs` 已在跑需要渲染器的套件之前调用并打印 `窗口状态：visible=… focus=…`。
+
+**5.9.4 把「设置」开成了第二个渲染窗口。** 主窗口 URL 带 `wbSeedToken=`，设置窗口带 `windowAppId=settings&windowKind=settings`。`filterRendererTargets` 原本按字典序排，设置窗口会抢到 `targets[0]` → `cli.mjs status` / `check-skin.mjs` 连到设置窗口上读皮肤状态，报「未安装」。现在 `src/cdp-client.mjs` 的 `compareTargets` 首级用 `isChildRendererUrl()`（`/[?&](?:windowKind|windowAppId)=/i`）把子窗口排到后面；`scripts/_harness.mjs` 早就单独过滤过一遍。凡是拿 `targets[0]` 的新代码，仍然建议显式过滤。
+
+**`publish-via-api.mjs` 的 blob sha 核对必须用归一化后的字节。** 本仓库 `core.autocrlf=true`：工作区是 CRLF、仓库里存的是 LF。用工作区原始字节算 `git blob sha` 必然和远端对不上 —— 发 1.0.7 时 8 个文件全部误报「远端 d6e8ae7 != 本地 775ef3e」，发布被拦在第 [6] 步。已改为**默认归一化**（`--no-normalize-eol` 可关，二进制仍按扩展名跳过）。自检方法：`Buffer.from(raw.toString("utf8").replace(/\r\n/g,"\n"),"utf8")` 算出的 sha 应等于 `git rev-parse HEAD:<path>`。
 
 **快捷方式的参数拼写必须和启动器对齐，而 vbs 是把参数原样透传的。** `setup-autoskin.ps1` 的 `$vbsArgs` 一度写成 PowerShell 风格的 `-WorkBuddyExe ... -Port ...`，而 `launch-and-skin.mjs` 只认 `--exe / --port` → 双击图标时启动器当场抛「无法识别的参数」然后退出；**vbs 又是用隐藏窗口跑的（`shell.Run cmd, 0, False`），报错一个字都传不到眼前** → 症状就是"点了没反应 / 国内版打不开"。两头都要堵：启动器加 `ARG_ALIASES` 认下旧拼写（让已经绑好的图标记即恢复），生成的快捷方式改成规范双横线。
 
