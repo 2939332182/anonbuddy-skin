@@ -4,7 +4,7 @@
 //
 // 前置：需要 WorkBuddy 设置面板能打开。测试自己走「个人中心 → 设置」把面板打开。
 
-import { createHarness } from "./_harness.mjs";
+import { createHarness, settingsPanelBecameChildWindow } from "./_harness.mjs";
 
 const MENU_ID = "anonbuddy-skin-menu";
 const t = await createHarness({ name: "test-settings-panel" });
@@ -59,6 +59,15 @@ const closeSettings = async () => {
 // 先确保皮肤在装（脚本 API 才存在）
 await t.applyLast();
 await waitFor(async () => Boolean(await evaluate(`window.__anonbuddySkin?.settings`)), { waitMs: 10000, stepMs: 200 });
+
+// 5.9.4 把设置面板搬到了独立 BrowserWindow，本文件的断言全按主窗口 DOM 写。
+// 迁到子窗口之前先诚实报 SKIP，而不是产出一片假 FAIL 掩盖真问题。
+const movedLayout = await settingsPanelBecameChildWindow(session, t.port);
+if (movedLayout) {
+  console.log(`SKIP  ${movedLayout}`);
+  await t.finish();
+  process.exit(0);
+}
 
 const initial = await evaluate(`(() => {
   const sk = window.__anonbuddySkin;

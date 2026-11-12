@@ -29,7 +29,13 @@ const triggerPoint = () =>
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return null;
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    // 窗口矮于 ~790px 时侧边栏 footer 会溢出视口底部（5.9.4 原生布局，与皮肤无关），
+    // 触发器中心落到视口外，派发到 y>innerHeight 的鼠标事件会被直接丢弃。
+    // 这里取可见部分的中心点，保证点在元素上。
+    if (r.y > innerHeight - 4) return null;
+    const x = Math.round(r.x + r.width / 2);
+    const y = Math.round(Math.min(Math.max(r.y + r.height / 2, 1), innerHeight - 2));
+    return { x, y };
   })()`);
 
 const clickTrigger = async () => {
@@ -127,6 +133,15 @@ await sleep(1200);
 
 const hasApi = await evaluate(`Boolean(window.__anonbuddySkin)`);
 check("注入脚本 API 存在（皮肤已装载）", hasApi === true, String(hasApi));
+
+// 本用例靠 CDP 真实鼠标点击开浮层：窗口被遮挡/最小化时 Chromium 会吞掉输入
+// （实测 mouseMoved 从 10ms 涨到 5019ms），断言必然假红。窗口不在前台就诚实 SKIP。
+const winState = await evaluate(`({ vis: document.visibilityState, focus: document.hasFocus() })`);
+if (winState.vis !== "visible" || winState.focus !== true) {
+  console.log(`SKIP  WorkBuddy 不在前台（visibility=${winState.vis}, focus=${winState.focus}），真实鼠标点击类断言无法进行`);
+  await t.finish();
+  process.exit(0);
+}
 
 const dataThemeIds = await t.loadMenuThemes().then((tms) => tms.map((m) => m.manifest.id));
 check("读到磁盘上的内置主题", dataThemeIds.length >= 1, JSON.stringify(dataThemeIds));

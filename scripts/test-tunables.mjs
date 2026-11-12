@@ -17,12 +17,20 @@
 //    改成写"真实元素的内联 style"（背景图层）/ "消费它的元素自身"（侧边栏）后是 0ms。
 //    所以下面第 9 节把同步开销也钉住。
 
-import { createHarness } from "./_harness.mjs";
+import { createHarness, settingsPanelBecameChildWindow } from "./_harness.mjs";
 
 const t = await createHarness({ name: "test-tunables" });
 const { evaluate, sleep, check, waitFor } = t;
 
 await t.applyLast();
+
+// 5.9.4 把设置面板搬到了独立 BrowserWindow，本文件的断言全按主窗口 DOM 写。
+const movedLayout = await settingsPanelBecameChildWindow(t.session, t.port);
+if (movedLayout) {
+  console.log(`SKIP  ${movedLayout}`);
+  await t.finish();
+  process.exit(0);
+}
 
 // 先把两个值显式还原成默认：它们存在 localStorage 里，上一次运行可能留下别的值。
 // （测试必须自带前置状态，不能依赖"上次跑到哪"—— 这是本项目测试的老规矩。）

@@ -18,6 +18,7 @@ import { loadTheme } from "../src/theme-schema.mjs";
 import { listThemes } from "../src/theme-store.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 
 export const DEFAULT_PORT = 9333;
 
@@ -74,6 +75,60 @@ export async function createHarness(options = {}) {
       })()
     : null;
 
+  // ---- 状态隔离 ---------------------------------------------------------
+  // 每个测试都会改主题 / 暂停位 / 自定义主题，一旦中途抛错或提前退出，残留就会把
+  // 下一个脚本带挂（实测「单跑全绿、整套乱挂」，restore-last 最明显）。
+  // 所以在连接后立刻快照用户状态，退出时（含异常退出）原样写回。
+  const SKIN_LS_KEYS = [
+    "anonbuddySkinLastTheme",
+    "anonbuddySkinWeTheme",
+    "anonbuddySkinWePaused",
+    "anonbuddySkinAliases",
+    "anonbuddySkinBootTheme",
+    "anonbuddySkinTunables",
+    "anonbuddySkinIconHidden",
+    "anonbuddySkinWeSound",
+    "anonbuddySkinWeFilter",
+    "anonbuddySkinWeVolume",
+  ];
+  const skinStatePath = join(
+    process.env.LOCALAPPDATA ??
+      join(process.env.USERPROFILE ?? ".", "AppData", "Local"),
+    "AnonBuddySkin",
+    "state.json",
+  );
+  const snapshotLs = session
+    ? await session.evaluate(
+        `(() => { const o = {}; for (const k of ${JSON.stringify(SKIN_LS_KEYS)}) { const v = localStorage.getItem(k); if (v !== null) o[k] = v; } return o; })()`,
+      )
+    : null;
+  const snapshotState = existsSync(skinStatePath)
+    ? readFileSync(skinStatePath, "utf8")
+    : null;
+
+  const restoreStateFile = () => {
+    try {
+      if (snapshotState === null) rmSync(skinStatePath, { force: true });
+      else writeFileSync(skinStatePath, snapshotState);
+    } catch {
+      /* 还原失败不阻断测试结论 */
+    }
+  };
+  // exit 里只能跑同步操作；state.json 是 restoreLast 的唯一来源，必须兜住
+  process.once("exit", restoreStateFile);
+
+  const restoreSnapshot = async () => {
+    if (!session || !snapshotLs) return;
+    try {
+      await session.evaluate(
+        `(() => { const want = ${JSON.stringify(snapshotLs)}; for (const k of ${JSON.stringify(SKIN_LS_KEYS)}) { const v = want[k]; if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } return true; })()`,
+      );
+    } catch {
+      /* 连接可能已经断了 */
+    }
+    restoreStateFile();
+  };
+
   let passed = 0;
   let failed = 0;
   const failures = [];
@@ -90,13 +145,16 @@ export async function createHarness(options = {}) {
   const note = (label) => console.log(`----  ${label}`);
 
   // 状态中性：即便测试中途抛错，也保证连接被关掉、把皮肤恢复成"用户原主题"。
-  // restore() 是可选回调，由测试自己决定怎么还原（多数场景用 applyLast）。
-  const finish = async ({ restore } = {}) => {
+  // 默认就还原 —— 之前只有传 restore 才还原，结果 test-pause-restore 这类
+  // 会停在"暂停/无皮肤"状态的测试把后面的脚本一起带挂（整套跑 vs 单跑结果不一致）。
+  const finish = async ({ restore = true } = {}) => {
     let restoreError = null;
-    if (restore) {
+    if (restore !== false) {
       try {
-        const entry = Object.assign(Object.create(null), h, { restore });
-        await entry.applyLast();
+        // 先把 localStorage / state.json 还原成测试前的值，再按它重新装一遍皮肤：
+        // 顺序反了的话 applyLast 写回的是测试中途的主题，隔离就白做了。
+        await restoreSnapshot();
+        await h.applyLast();
       } catch (error) {
         restoreError = error;
       }
@@ -259,3 +317,34 @@ export const probeSkinState = (session) =>
       themeId: document.documentElement.dataset.anonbuddySkin ?? null,
     };
   })()`);
+
+/** 5.9.4 起设置面板是独立 BrowserWindow，主窗口里再没有 .settings-modal-*。
+ *  依赖主窗口设置 DOM 的用例在迁到子窗口之前先调用本函数：
+ *  返回非空字符串 = 当前环境已换布局、断言位置不对，调用方据此 SKIP（而不是报假 FAIL）。
+ *  探测时会顺手触发一次 settings.open()，判为子窗口后把窗口关回去，不留残余。 */
+export async function settingsPanelBecameChildWindow(session, port, { waitMs = 5000 } = {}) {
+  const inline = () =>
+    session.evaluate(`Boolean(document.querySelector(".settings-modal, .settings-modal-overlay"))`).catch(() => false);
+  if (await inline()) return ""; // 旧布局：面板就挂在主窗口里
+  await session
+    .evaluate(`(() => { try { window.__anonbuddySkin?.settings?.open?.(); } catch {} return true; })()`)
+    .catch(() => {});
+  const deadline = Date.now() + waitMs;
+  do {
+    if (await inline()) return "";
+    let targets = [];
+    try {
+      targets = await fetchRendererTargets(port);
+    } catch {
+      targets = [];
+    }
+    if (targets.some((t) => /[?&](?:windowKind|windowAppId)=/i.test(t.url))) {
+      await session
+        .evaluate(`(() => { try { window.__anonbuddySkin?.settings?.close?.(); } catch {} return true; })()`)
+        .catch(() => {});
+      return "设置面板在 5.9.4 已是独立 BrowserWindow，本用例断言仍按主窗口 DOM 写，待迁移到子窗口";
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  } while (Date.now() < deadline);
+  return "";
+}

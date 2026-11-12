@@ -21,7 +21,8 @@ if (!pageVisible) {
 // 到别的页去，这样切回新建任务时标题会重新挂载（模拟"打开新建任务"）
 await session.evaluate(`(() => {
   [...document.querySelectorAll("[data-view-id=sidebar] button")]
-    .find((b) => (b.textContent || "").trim().endsWith("助理"))?.click();
+    // 5.9.4 把按钮文案改成了「助理Beta」，用 includes 而不是 endsWith 才不会被版本带着走
+    .find((b) => (b.textContent || "").trim().includes("助理"))?.click();
   return true;
 })()`);
 await new Promise((r) => setTimeout(r, 1200));

@@ -17,13 +17,21 @@
 
 import { fileURLToPath } from "node:url";
 
-import { createHarness } from "./_harness.mjs";
+import { createHarness, settingsPanelBecameChildWindow } from "./_harness.mjs";
 import { pickBestTexture, readCachedHero, readImageSize, resolveRepkg, sweepStrayRaw } from "../src/we-extract.mjs";
 
 const t = await createHarness({ name: "test-we" });
 const { evaluate, sleep, check, waitFor } = t;
 
 await t.applyLast();
+
+// 5.9.4 把设置面板搬到了独立 BrowserWindow，本文件的断言全按主窗口 DOM 写。
+const movedLayout = await settingsPanelBecameChildWindow(t.session, t.port);
+if (movedLayout) {
+  console.log(`SKIP  ${movedLayout}`);
+  await t.finish();
+  process.exit(0);
+}
 
 const openSettings = async () => {
   if (await evaluate(`Boolean(document.querySelector(".settings-modal-overlay"))`)) return true;

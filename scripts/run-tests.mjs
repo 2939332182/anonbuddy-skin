@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchRendererTargets } from "../src/cdp-client.mjs";
+import { ensureWindowAwake } from "./ensure-window-awake.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = (name) => join(ROOT, "scripts", name);
@@ -160,6 +161,13 @@ if (selected.some((s) => SUITES[s].needsRenderer) && !args.only) {
   } catch {
     rendererUp = false;
   }
+  if (rendererUp) {
+    // 窗口被遮挡/收进托盘时 Chromium 停发输入与 rAF：mouseMoved 从 10ms 变 5019ms，
+    // 布局与动画断言会成片失真。跑之前先把它唤到前台，别让环境冒充回归。
+    const awake = await ensureWindowAwake(PORT);
+    if (awake.ok) console.log(`窗口状态：visible=${awake.vis} focus=${awake.focus}${awake.woke ? "（已唤到前台）" : "（已在前台）"}`);
+    else console.log(`注意：没能把 WorkBuddy 唤到前台（visibility=${awake.vis ?? "?"}），依赖真实输入的用例可能假红。`);
+  }
   if (!rendererUp) {
     console.log(`注意：端口 ${PORT} 上没有 renderer，需要渲染器的套件将跳过。`);
     console.log("      启动 WorkBuddy 后重跑，或设 WORKBUDDY_SKIN_PORT 指定端口。\n");
@@ -196,7 +204,9 @@ for (const suiteName of selected) {
     if (passCount) console.log(`   (${passCount} 项 PASS 已折叠)`);
 
     let status = "FAIL";
-    if (code === 0) status = "PASS";
+    // 用例自己声明"当前环境跑不了"（输出以 SKIP 开头的行 + 退出码 0）时记 SKIP，
+    // 不能算 PASS —— 那会把"没验到"伪装成"验过了"。
+    if (code === 0) status = lines.some((l) => l.startsWith("SKIP")) ? "SKIP" : "PASS";
     else if (code === 2) status = "ERROR";
     summary.push({ suite: suiteName, file: c.file, status, code });
 

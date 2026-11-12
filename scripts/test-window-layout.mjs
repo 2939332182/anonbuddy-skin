@@ -44,13 +44,14 @@ try {
 
   // ---- 2. sticky 行必须能遮住滚动内容 ----
   const sticky = await evaluate(`(() => {
-    const pick = (sel) => {
-      const el = document.querySelector("[data-view-id=sidebar] " + sel);
-      if (!el) return null;
+    const pickAll = (sel) => [...document.querySelectorAll("[data-view-id=sidebar] " + sel)].map((el) => {
       const cs = getComputedStyle(el);
       return { position: cs.position, bg: cs.backgroundColor, img: cs.backgroundImage === "none" ? "none" : "gradient" };
-    };
-    return { label: pick(".conversation-section-label"), workspace: pick("[class*='_headerTopPadding_']") };
+    });
+    // 5.9.4 起侧边栏里 sticky 的只有分组标题本身（两个：空间 / 工作区），
+    // 旧代码找的 [class*='_headerTopPadding_'] 是普通容器，position 本来就是 static。
+    const labels = pickAll(".conversation-section-label");
+    return { label: labels[0] ?? null, workspace: labels[1] ?? null };
   })()`);
   const alphaOf = (v) => {
     const c = String(v);

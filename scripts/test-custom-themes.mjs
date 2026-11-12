@@ -74,7 +74,8 @@ try {
   await rightClick(customRow.x, customRow.y);
   let ctx = await ctxState();
   t.check("自定义行右键弹出菜单", ctx.open === true);
-  t.check("菜单含「重命名」与「删除」", JSON.stringify(ctx.items) === JSON.stringify(["重命名", "删除"]), JSON.stringify(ctx.items));
+  // 5.9.4 起自定义行菜单是 [重命名, 设为开机默认主题, 删除]：只锁首项与「有删除」，不锁中间项的位置。
+  t.check("菜单含「重命名」与「删除」", ctx.items[0] === "重命名" && ctx.items.includes("删除"), JSON.stringify(ctx.items));
 
   // ---- 2. Esc 关闭 ----
   await pressEsc();
@@ -84,7 +85,8 @@ try {
   const diskRow = await rowRect(diskTheme);
   await rightClick(diskRow.x, diskRow.y);
   ctx = await ctxState();
-  t.check("磁盘主题行菜单只有「重命名」", JSON.stringify(ctx.items) === JSON.stringify(["重命名"]), JSON.stringify(ctx.items));
+  // 磁盘主题不可删：菜单可以多出「设为开机默认主题」，但绝不能有「删除」。
+  t.check("磁盘主题行菜单没有「删除」", ctx.items[0] === "重命名" && !ctx.items.includes("删除"), JSON.stringify(ctx.items));
 
   // ---- 4. 菜单里点「重命名」→ 进入编辑态 ----
   const renameItem = await ctxItemRect(0);
@@ -99,10 +101,10 @@ try {
 
   // ---- 5. 删除需要两次点击，第一次不落盘 ----
   await rightClick(customRow.x, customRow.y);
-  const deleteItem = await ctxItemRect(1);
+  const deleteItem = await ctxItemRect((await ctxState()).items.indexOf("删除"));
   await leftClick(deleteItem.x, deleteItem.y);
   ctx = await ctxState();
-  t.check("首次点删除变成确认提示", ctx.items[1] === "再点一次确认删除", JSON.stringify(ctx.items));
+  t.check("首次点删除变成确认提示", ctx.items.includes("再点一次确认删除"), JSON.stringify(ctx.items));
   t.check("首次点删除不真的删", (await customState()).stored.length === initial.stored.length);
 
   // ---- 6. 点菜单外面关掉菜单（且不误删）——用 🎨 按钮做安全的外部点击目标 ----
@@ -152,7 +154,7 @@ try {
 
   const tempRow = await rowRect(tempId);
   await rightClick(tempRow.x, tempRow.y);
-  const delTemp = await ctxItemRect(1);
+  const delTemp = await ctxItemRect((await ctxState()).items.indexOf("删除"));
   await leftClick(delTemp.x, delTemp.y);
   await leftClick(delTemp.x, delTemp.y);
   await sleep(200);

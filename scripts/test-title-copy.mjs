@@ -143,7 +143,15 @@ const sidebarLeak = await session.evaluate(`(() => {
   }
   return texts;
 })()`);
-t.check("侧边栏其它按钮文案未被改动", sidebarLeak.includes("新建任务") && sidebarLeak.includes("助理"), sidebarLeak.join("/"));
+// 5.9.4 把这个按钮从「助理」改成了「助理Beta」：用前缀匹配，
+// 并且额外断言皮肤文案没有外溢到侧边栏，避免上游改文案就把测试打挂。
+t.check(
+  "侧边栏其它按钮文案未被改动",
+  sidebarLeak.some((x) => x.startsWith("新建任务")) &&
+    sidebarLeak.some((x) => x.startsWith("助理")) &&
+    !sidebarLeak.some((x) => /ChihayaAnon/i.test(x)),
+  sidebarLeak.join("/"),
+);
 
 // ---- 原文案能识别（幂等，不会重复替换）----
 const idempotent = await session.evaluate(`(() => {

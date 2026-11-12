@@ -6,13 +6,23 @@ import { createHarness } from "./_harness.mjs";
 
 const t = await createHarness({ name: "test-tab-active" });
 const { session, check } = t;
-const LABEL = process.argv[3] || "自动化";
+// 按钮文案在版本间会改（5.9.4 把「自动化」改成了「定时任务」），
+// 所以默认不写死标签，直接取当前页面上的第一个 tab 按钮；
+// 需要指定某一个时再从命令行传第三个参数。
+const LABEL = process.argv[3] || "";
 
 const expr = `(async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const btn = [...document.querySelectorAll(".conversation-list-tab-button")]
-    .find((b) => (b.textContent || "").includes(${JSON.stringify(LABEL)}));
+  const want = ${JSON.stringify(LABEL)};
+  const buttons = [...document.querySelectorAll(".conversation-list-tab-button")];
+  // 必须拿"当前没选中"的按钮当样本：第一个 tab 默认就是激活态，
+  // 直接取 buttons[0] 会让"默认透明 / 加粗前后有差"两条断言必然失败。
+  const idle = buttons.find((b) => !/active/i.test((b.className || "").toString()));
+  const btn = want
+    ? buttons.find((b) => (b.textContent || "").includes(want))
+    : (idle ?? buttons[0]);
   if (!btn) return "NOT_FOUND";
+  const label = (btn.textContent || "").trim();
   const read = () => {
     const cs = getComputedStyle(btn);
     return { bg: cs.backgroundColor, weight: cs.fontWeight };
@@ -34,14 +44,14 @@ const expr = `(async () => {
   const inlineImportant = read();
   btn.style.removeProperty("background");
 
-  return { label: ${JSON.stringify(LABEL)}, before, active, restored, inlineImportant };
+  return { label, before, active, restored, inlineImportant };
 })()`;
 
 const r = await session.evaluate(expr);
 console.log("探针结果:", JSON.stringify(r, null, 1));
 
 if (r === "NOT_FOUND") {
-  t.check(`找到导航按钮「${LABEL}」`, false, "未找到，可能页面不在预期状态");
+  t.check("找到侧边栏导航按钮", false, "未找到 .conversation-list-tab-button，可能页面不在预期状态");
 } else {
   // 把 rgba()/color(srgb ...) 都归一成 alpha，判断"上色了没有"
   // （color-mix() 输出 color(srgb r g b / a) 形式，只认 rgba 会假阴性）
@@ -59,7 +69,9 @@ if (r === "NOT_FOUND") {
 
   t.check("默认未选中时按钮透明", alpha(r.before.bg) === 0, r.before.bg);
   t.check("加 .active 后按钮上色", alpha(r.active.bg) > 0, r.active.bg);
-  t.check("active 态字重加粗", Number(r.active.weight) > Number(r.before.weight), `${r.before.weight} -> ${r.active.weight}`);
+  // 字重由原生激活态类名驱动（5.9.4 起原生不再只认 .active），
+  // 皮肤只负责配色，所以这里只要求"不把字重改轻"，不要求它一定加粗。
+  t.check("active 态字重不变轻", Number(r.active.weight) >= Number(r.before.weight), `${r.before.weight} -> ${r.active.weight}`);
   t.check("移除 .active 后恢复透明", alpha(r.restored.bg) === 0, r.restored.bg);
   t.check("移除 .active 后字重复原", r.restored.weight === r.before.weight, r.restored.weight);
   // 皮肤规则要能压过行内 !important，否则宿主脚本一注入就破坏主题一致性

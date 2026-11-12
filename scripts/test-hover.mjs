@@ -15,10 +15,20 @@ const OUT = new URL("../outputs/verify/sidebar-hover.png", import.meta.url);
 
 const row = await s.evaluate(`(() => {
   const rows = [...document.querySelectorAll("[data-view-id=sidebar] .cb-agent-card")];
-  const el = rows.find((x) => !(x.className || "").toString().includes("_selected_"));
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), text: (el.textContent || "").slice(0, 14) };
+  for (const el of rows) {
+    if ((el.className || "").toString().includes("_selected_")) continue;
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.x + r.width / 2);
+    const y = Math.round(r.y + r.height / 2);
+    if (x <= 0 || y <= 0 || x >= innerWidth || y >= innerHeight) continue;
+    // 必须真的能被指针命中：顶部的行会被 tabs 容器 / sticky 表头盖住，
+    // 拿它们当悬停目标只能采到"命中的是别人"，白白失败。
+    const hit = document.elementFromPoint(x, y);
+    if (hit && hit.closest && hit.closest(".cb-agent-card") === el) {
+      return { x, y, text: (el.textContent || "").slice(0, 14) };
+    }
+  }
+  return null;
 })()`);
 console.log("HOVER_TARGET=" + JSON.stringify(row));
 check("侧边栏找到可悬停的列表项", Boolean(row));

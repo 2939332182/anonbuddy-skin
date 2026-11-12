@@ -13,7 +13,7 @@
 //
 // 本测试锁死这两件事：切换必须够快、深浅两态设置界面文字对比度必须达标。
 
-import { createHarness } from "./_harness.mjs";
+import { createHarness, settingsPanelBecameChildWindow } from "./_harness.mjs";
 
 const t = await createHarness({ name: "test-theme-switch-perf" });
 const { evaluate, sleep, waitFor, check } = t;
@@ -26,6 +26,15 @@ const SYNC_BUDGET_MS = 40;
 const WORST_BUDGET_MS = 90;
 
 const hasApi = await evaluate(`Boolean(window.__anonbuddySkin)`);
+
+// 5.9.4 把设置面板搬到了独立 BrowserWindow：读不到原生主题清单就要连子窗口。
+const movedLayout = await settingsPanelBecameChildWindow(t.session, t.port);
+if (movedLayout) {
+  console.log(`SKIP  ${movedLayout}`);
+  await t.finish();
+  process.exit(0);
+}
+
 check("注入脚本 API 存在", hasApi === true, String(hasApi));
 
 const initialTheme = await t.currentThemeId();
