@@ -81,7 +81,10 @@ const FILES = list("--files");
 // ⚠️ 推送前把 CRLF 压成 LF。**必须用**：`core.autocrlf=true` 时 git 里存的是 LF、
 //    工作区是 CRLF，而本脚本读的是工作区字节 —— 不归一化就会把远端文件的行尾改掉
 //    （1.0.5 首发踩过：3 个 CRLF 文件被推成 CRLF，与仓库其余部分不一致）。
-const NORMALIZE_EOL = flag("--normalize-eol");
+// 行尾归一化默认开启：本仓库 core.autocrlf=true，工作区是 CRLF、仓库里存的是 LF。
+// 不归一化就用工作区字节算 blob sha，必然与远端对不上 —— 实测 8 个文件全部误报
+// 「远端 d6e8ae7 != 本地 775ef3e」，把发布拦在核对这一步。二进制仍按扩展名跳过。
+const NORMALIZE_EOL = !flag("--no-normalize-eol");
 const TOKEN = process.env.GITHUB_TOKEN;
 
 if (!TOKEN) {
@@ -144,7 +147,7 @@ let totalBytes = 0;
 /**
  * 看着像二进制就别碰它的字节。
  *
- * 行尾归一化（--normalize-eol）是对**文本**做的，而它是全局开关 —— 对 GIF / PNG / ZIP
+ * 行尾归一化（默认开启，`--no-normalize-eol` 可关）是对**文本**做的，而它是全局开关 —— 对 GIF / PNG / ZIP
  * 走一遍 `toString("utf8").replace(/\r\n/g,"\n")` 再编码回去，会把文件彻底毁掉：
  * 非法字节变成 U+FFFD、编码后体积还会膨胀。实测把一个 1,411,132 字节的 GIF
  * 推成了 2,465,231 字节的乱码，GitHub 上那张图就再也显示不出来。
