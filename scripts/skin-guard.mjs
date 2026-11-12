@@ -23,7 +23,7 @@ import { defaults, prepareApply } from "../src/cli.mjs";
 import { DEFAULT_CDP_PORT, readProductInfo, resolveStudioPaths } from "../src/constants.mjs";
 import { buildInjectionPayload } from "../src/injector.mjs";
 import { SkinGuard } from "../src/skin-guard.mjs";
-import { detectEdition, installedVersion, runSelfUpdate } from "../src/self-update.mjs";
+import { detectEdition, editionFromPort, installedVersion, runSelfUpdate } from "../src/self-update.mjs";
 
 // 守护是被启动器 detached 拉起来的（stdio: "ignore"），stdout 直接进黑洞 ——
 // 出问题时没有任何现场可看。所以自己落一份日志：前台跑时照样打印，
@@ -142,11 +142,15 @@ async function main() {
       /* 畸形 URL 当作根路径处理 */
     }
     try {
+      // 安装目录名推不出产品线（开发仓库 / 用户改过名）时按 CDP 端口判定。
+      // 不这么做的话 edition 为空 → 取资产列表第一个，而 zips[0] 是 cn 包，
+      // 国际版用户点一次「一键更新」就被换成国内包（2026-11-12 实测 /status 返回 edition:""）。
+      const edition = detectEdition(ROOT_DIR) || editionFromPort(args.port);
       if (pathname === "/status") {
         sendJson(res, 200, {
           ok: true,
           version: installedVersion(ROOT_DIR),
-          edition: detectEdition(ROOT_DIR),
+          edition,
           root: ROOT_DIR,
           cdpPort: args.port,
         });
@@ -154,11 +158,11 @@ async function main() {
       }
       if (pathname === "/update") {
         const force = /[?&]force=1/.test(req.url || "");
-        log(`收到一键更新请求（force=${force}）`);
+        log(`收到一键更新请求（force=${force}，edition=${edition || "?"}）`);
         const result = await runSelfUpdate({
           root: ROOT_DIR,
           repo: repoSlug,
-          edition: detectEdition(ROOT_DIR),
+          edition,
           force,
           apply: true,
           log: (message) => log(`[update] ${message}`),

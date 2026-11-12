@@ -9,7 +9,7 @@
 给 WorkBuddy 桌面端（腾讯的 AI 办公客户端）换肤的工具。原理：用 `--remote-debugging-port` 把 WorkBuddy 拉起来，通过本机 CDP 连上它的渲染进程，注入一份 CSS 和一段脚本。**不改 `app.asar`、不改安装目录、不改签名**，效果只活在渲染进程里，进程一换就没了。
 
 仓库：https://github.com/2939332182/anonbuddy-skin
-当前版本：**1.0.6**，工作区在 `D:\workbuddy-skin-studio`
+当前版本：**1.0.7**，工作区在 `D:\workbuddy-skin-studio`
 
 ## 先记住这几条硬约束
 
@@ -443,6 +443,7 @@ localStorage 残留状态互相污染** —— 基线那次就因为继承了上
 
 | tag | 附件 |
 |:---|:---|
+| v1.0.7 | `chihayaanon-skin-1.0.7-cn.zip` / `-intl.zip`（检查更新改走网页入口免限流 + 更新前备份 + 端口判版本 + 5.9.4 兼容） |
 | v1.0.6 | `chihayaanon-skin-1.0.6-cn.zip` / `-intl.zip`（零黑框启动 + 外观系统 v2 + 设置内检查更新） |
 | v1.0.5 | `chihayaanon-skin-1.0.5-cn.zip` / `-intl.zip`（场景壁纸真渲染 + 四级降级链） |
 | v1.0.4 | `chihayaanon-skin-1.0.4-cn.zip` / `-intl.zip`（一键换肤顺手接好启动入口，用户零额外步骤） |

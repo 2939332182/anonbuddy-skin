@@ -92,7 +92,21 @@ function compareText(left, right) {
   return 0;
 }
 
+// 主窗口与设置窗口共用 renderer/index.html，只能靠 URL 参数区分：
+// 5.9.4 起设置窗口带 windowAppId=settings&windowKind=settings。
+// 按参数名判而不是按值判，免得以后 settings 改叫别的名字就漏。
+const CHILD_WINDOW_PARAM = /[?&](?:windowKind|windowAppId)=/i;
+
+export function isChildRendererUrl(url) {
+  return typeof url === "string" && CHILD_WINDOW_PARAM.test(url);
+}
+
 function compareTargets(left, right) {
+  // 主窗口必须排在首位：注入状态、探针和测试都取 targets[0]，
+  // 设置窗口抢到首位会让「皮肤装没装 / 菜单在不在」全部读到错的窗口。
+  const rank =
+    Number(isChildRendererUrl(left.url)) - Number(isChildRendererUrl(right.url));
+  if (rank !== 0) return rank;
   const leftKeys = [
     String(left.id ?? ""),
     left.url,
